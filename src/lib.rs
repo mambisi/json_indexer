@@ -228,16 +228,16 @@ impl Index {
         write_side.remove(k);
     }
 
-    pub fn batch( &mut self, f : fn(&mut Batch) ){
+    pub fn batch( &mut self, f : impl Fn(&mut Batch) + std::marker::Sync + std::marker::Send){
         let mut batch = Batch::new(self);
         f(&mut batch);
     }
 
-    pub fn iter(&self, f : fn((&String,&Value))){
+    pub fn iter(&self, f : impl Fn((&String,&Value)) + std::marker::Sync + std::marker::Send){
         self.rs.iter().for_each(f);
     }
 
-    pub fn par_iter(&self, f : fn((&String,&Value))){
+    pub fn par_iter(&self, f : impl Fn((&String,&Value)) + std::marker::Sync + std::marker::Send){
         self.rs.par_iter().for_each(f);
     }
 

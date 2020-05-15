@@ -87,6 +87,7 @@ fn it_works() {
     println!("{:?}", names_index.read());
 }
 
+
 /*
 #[test]
 fn test_shared_state() {
@@ -112,12 +113,19 @@ fn test_shared_state() {
         let index = Arc::clone(&index);
         let writing = thread::spawn(move || {
             let wait = time::Duration::from_millis(1);
-            for i in 0..20000 {
-                thread::sleep(wait);
-                let mut write_guard = index.write().unwrap();
-                let name_index = write_guard.get_mut("name_index").unwrap();
-                name_index.insert(format!("student:{:?}", i), json!(i));
-            }
+            let mut write_guard = index.write().unwrap();
+            let name_index = write_guard.get_mut("name_index").unwrap();
+            name_index.batch(|b| {
+
+                for i in 0..20000 {
+                    thread::sleep(wait);
+                    &b.insert(format!("student:{:?}", i), json!(i));
+                }
+
+                b.commit()
+            });
+
+
         });
         handles.push(writing);
     }
@@ -125,12 +133,19 @@ fn test_shared_state() {
         let index = Arc::clone(&index);
         let writing = thread::spawn(move || {
             let wait = time::Duration::from_millis(1);
-            for i in 21200..40000 {
-                thread::sleep(wait);
-                let mut write_guard = index.write().unwrap();
-                let name_index = write_guard.get_mut("name_index").unwrap();
-                name_index.insert(format!("student:{:?}", i), json!(i));
-            }
+            let mut write_guard = index.write().unwrap();
+            let name_index = write_guard.get_mut("name_index").unwrap();
+            name_index.batch(|b| {
+
+                for i in 21200..40000 {
+                    thread::sleep(wait);
+                    &b.insert(format!("student:{:?}", i), json!(i));
+                }
+
+                b.commit()
+            });
+
+
         });
         handles.push(writing);
     }
@@ -139,27 +154,11 @@ fn test_shared_state() {
         let index = Arc::clone(&index);
 
         let reading = thread::spawn(move || {
-            let wait = time::Duration::from_millis(1);
-            for _ in 0..60000 {
-                thread::sleep(wait);
-                let read_guard = index.read().unwrap();
-                let name_index = read_guard.get("name_index").unwrap();
-                debug!("{:?}", name_index.read())
-            }
-        });
-
-        handles.push(reading);
-    }{
-        let index = Arc::clone(&index);
-
-        let reading = thread::spawn(move || {
-            let wait = time::Duration::from_millis(1);
-            for _ in 0..100000 {
-                thread::sleep(wait);
-                let read_guard = index.read().unwrap();
-                let name_index = read_guard.get("name_index").unwrap();
-                debug!("{:?}", name_index.read())
-            }
+            let wait = time::Duration::from_secs(30);
+            thread::sleep(wait);
+            let read_guard = index.read().unwrap();
+            let name_index = read_guard.get("name_index").unwrap();
+            debug!("{:?}", name_index.read().len())
         });
 
         handles.push(reading);
