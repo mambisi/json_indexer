@@ -1,7 +1,10 @@
 use serde::{Serialize, Deserialize};
 use crate::*;
 use std::collections::HashMap;
-
+use std::sync::{Arc, RwLock};
+use std::{thread, env, time};
+use env_logger;
+use serde_json::Number;
 #[derive(Serialize, Deserialize)]
 struct Student {
     name: String,
@@ -49,7 +52,7 @@ fn it_works() {
         items.insert(k, json);
     });
 
-    let mut index = Index::new(indexer, &mut items);
+    let mut index = Index::new(indexer, items);
 
     index.batch(|b| {
         b.insert("student:4".to_string(), json!(
@@ -80,6 +83,91 @@ fn it_works() {
         ordering: IndexOrd::ASC
     });
 
-    let names_index = Index::new(string_indexer, &mut names);
+    let names_index = Index::new(string_indexer, names);
     println!("{:?}", names_index.read());
 }
+
+/*
+#[test]
+fn test_shared_state() {
+    env::set_var("RUST_LOG", "debug");
+    env_logger::init();
+
+    /*
+    let name_order = JsonPathOrder {
+        path: "name".to_string(),
+        ordering: IndexOrd::ASC,
+    };
+    let indexer = Indexer::Json(IndexJson {
+        path_orders: vec![name_order]
+    });
+    */
+    let mut indices = HashMap::new();
+    indices.insert("name_index".to_string(), Index::new(Indexer::Integer(IndexInt { ordering: IndexOrd::ASC }), IndexMap::new()));
+    let index = Arc::new(RwLock::new(indices));
+
+    let mut handles = vec![];
+
+    {
+        let index = Arc::clone(&index);
+        let writing = thread::spawn(move || {
+            let wait = time::Duration::from_millis(1);
+            for i in 0..20000 {
+                thread::sleep(wait);
+                let mut write_guard = index.write().unwrap();
+                let name_index = write_guard.get_mut("name_index").unwrap();
+                name_index.insert(format!("student:{:?}", i), json!(i));
+            }
+        });
+        handles.push(writing);
+    }
+    {
+        let index = Arc::clone(&index);
+        let writing = thread::spawn(move || {
+            let wait = time::Duration::from_millis(1);
+            for i in 21200..40000 {
+                thread::sleep(wait);
+                let mut write_guard = index.write().unwrap();
+                let name_index = write_guard.get_mut("name_index").unwrap();
+                name_index.insert(format!("student:{:?}", i), json!(i));
+            }
+        });
+        handles.push(writing);
+    }
+
+    {
+        let index = Arc::clone(&index);
+
+        let reading = thread::spawn(move || {
+            let wait = time::Duration::from_millis(1);
+            for _ in 0..60000 {
+                thread::sleep(wait);
+                let read_guard = index.read().unwrap();
+                let name_index = read_guard.get("name_index").unwrap();
+                debug!("{:?}", name_index.read())
+            }
+        });
+
+        handles.push(reading);
+    }{
+        let index = Arc::clone(&index);
+
+        let reading = thread::spawn(move || {
+            let wait = time::Duration::from_millis(1);
+            for _ in 0..100000 {
+                thread::sleep(wait);
+                let read_guard = index.read().unwrap();
+                let name_index = read_guard.get("name_index").unwrap();
+                debug!("{:?}", name_index.read())
+            }
+        });
+
+        handles.push(reading);
+    }
+
+    for handle in handles {
+        handle.join().unwrap();
+    }
+    // writing.join().unwrap();
+}
+*/
