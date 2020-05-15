@@ -15,6 +15,7 @@ use json_dotpath::DotPaths;
 use std::cmp::Ordering;
 
 use serde::{Serialize, Deserialize};
+use std::collections::HashSet;
 
 #[derive(Serialize, Deserialize)]
 pub enum Indexer {
@@ -56,9 +57,55 @@ pub struct Index {
     pub collection: IndexMap<String, Value>,
 }
 
+trait BatchTransaction {
+    fn insert(&mut self, k: String, v: Value);
+    fn update(&mut self, k: String, v: Value);
+    fn delete(&mut self, k: String);
+    fn commit(&self);
+}
+
+pub struct Batch<'a> {
+    index : &'a mut Index,
+    inserts : IndexMap<String, Value>,
+    updates : IndexMap<String, Value>,
+    deletes : HashSet<String>
+}
+
+impl<'a > Batch<'a> {
+    fn new( idx : &'a mut Index) -> Self {
+        Batch {
+            index: idx,
+            inserts: IndexMap::new(),
+            updates: IndexMap::new(),
+            deletes: HashSet::new()
+        }
+    }
+}
+
+impl<'a> BatchTransaction for Batch<'a> {
+    fn insert(&mut self, k: String, v: Value) {
+        self.inserts.insert(k,v);
+    }
+
+    fn update(&mut self, k: String, v: Value) {
+        self.updates.insert(k,v);
+    }
+
+    fn delete(&mut self, k: String) {
+        self.deletes.insert(k);
+    }
+
+    fn commit(&self) {
+        //do insertions
+        //do updates
+        //do deletions
+    }
+}
+
+
 impl Index {
     pub fn new(indexer: Indexer, items: &mut IndexMap<String, Value>) -> Self {
-        let filterd: IndexMap<&String, &Value> = match &indexer {
+        let filtered: IndexMap<&String, &Value> = match &indexer {
             Indexer::Json(j) => {
                 items.iter().filter(|(_, v)| {
                     let mut found = 0;
@@ -89,7 +136,7 @@ impl Index {
             }
         };
         let mut collection : IndexMap<String,Value> = IndexMap::new();
-        filterd.iter().for_each(|(k,v)| {
+        filtered.iter().for_each(|(k,v)| {
             &collection.insert(k.to_string(), v.clone().clone());
         });
         let mut idx = Index {
@@ -132,6 +179,15 @@ impl Index {
             }
         };
         self.build();
+    }
+
+    pub fn remove(&mut self, k : &String){
+        self.collection.remove(k);
+    }
+
+    pub fn batch( &mut self, f : fn(&mut Batch) ){
+        let mut batch = Batch::new(self);
+        f(&mut batch)
     }
 
 

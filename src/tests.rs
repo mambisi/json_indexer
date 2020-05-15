@@ -8,6 +8,7 @@ struct Student {
     age: u8,
     grade: f64,
 }
+
 #[test]
 fn it_works() {
     let mut students: HashMap<String, Student> = HashMap::new();
@@ -49,15 +50,21 @@ fn it_works() {
     });
 
     let mut index = Index::new(indexer, &mut items);
-    index.insert("student:4".to_string(), json!({
-        "name": "Bug",
-        "age" : 11,
-        "grade": 3.1,
-        "photo" : {
-            "id" : "2121",
-            "url" : "example.com"
-        }
-    }));
+
+    index.batch(|b| {
+        b.insert("student:4".to_string(), json!(
+            {
+            "name": "Bug",
+            "age" : 11,
+            "grade": 3.1,
+            "photo" : {
+                "id" : "2121",
+                "url" : "example.com"
+                }
+            }
+        ));
+        b.commit()
+    });
 
     println!("{:?}", index.collection);
 
