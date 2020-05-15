@@ -66,7 +66,7 @@ fn it_works() {
         b.commit()
     });
 
-    println!("{:?}", index.collection);
+    println!("{:?}", index.read());
 
     let mut names = IndexMap::new();
     names.insert("user.1".to_owned(), Value::String("Kwadwo".to_string()));
@@ -81,5 +81,5 @@ fn it_works() {
     });
 
     let names_index = Index::new(string_indexer, &mut names);
-    println!("{:?}", names_index.collection);
+    println!("{:?}", names_index.read());
 }

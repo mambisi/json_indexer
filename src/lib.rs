@@ -13,39 +13,41 @@ use indexmap::map::IndexMap;
 use serde_json::{Value};
 use json_dotpath::DotPaths;
 use std::cmp::Ordering;
-
+use rayon::prelude::*;
 use serde::{Serialize, Deserialize};
-use std::collections::HashSet;
+use std::collections::{HashSet, HashMap};
+use std::sync::Mutex;
+use std::borrow::Borrow;
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize,Clone)]
 pub enum Indexer {
     Json(IndexJson),
     Integer(IndexInt),
     Float(IndexFloat),
     String(IndexString),
 }
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub enum IndexOrd {
     ASC,
     DESC,
 }
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct IndexInt {
     pub ordering: IndexOrd
 }
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct IndexString {
     pub ordering: IndexOrd
 }
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct IndexFloat {
     pub ordering: IndexOrd
 }
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct IndexJson {
     pub path_orders: Vec<JsonPathOrder>
 }
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct JsonPathOrder {
     pub path: String,
     pub ordering: IndexOrd,
@@ -54,20 +56,21 @@ pub struct JsonPathOrder {
 #[derive(Serialize, Deserialize)]
 pub struct Index {
     pub indexer: Indexer,
-    pub collection: IndexMap<String, Value>,
+    rs: IndexMap<String, Value>,
+    ws: IndexMap<String, Value>,
 }
 
 trait BatchTransaction {
     fn insert(&mut self, k: String, v: Value);
     fn update(&mut self, k: String, v: Value);
     fn delete(&mut self, k: String);
-    fn commit(&self);
+    fn commit(&mut self);
 }
 
 pub struct Batch<'a> {
     index : &'a mut Index,
-    inserts : IndexMap<String, Value>,
-    updates : IndexMap<String, Value>,
+    inserts : HashMap<String, Value>,
+    updates : HashMap<String, Value>,
     deletes : HashSet<String>
 }
 
@@ -75,8 +78,8 @@ impl<'a > Batch<'a> {
     fn new( idx : &'a mut Index) -> Self {
         Batch {
             index: idx,
-            inserts: IndexMap::new(),
-            updates: IndexMap::new(),
+            inserts: HashMap::new(),
+            updates: HashMap::new(),
             deletes: HashSet::new()
         }
     }
@@ -95,10 +98,28 @@ impl<'a> BatchTransaction for Batch<'a> {
         self.deletes.insert(k);
     }
 
-    fn commit(&self) {
-        //do insertions
-        //do updates
-        //do deletions
+    fn commit(&mut self) {
+        let mut collection = self.index.write();
+        self.inserts.iter().for_each(|(k,v)|{
+           collection.insert(k.to_string(),v.clone());
+        });
+        self.updates.iter().for_each(|(k,v)| {
+            if collection.contains_key(k) {
+                collection.insert(k.to_string(),v.clone());
+            }
+        });
+        self.deletes.iter().for_each(|k|{
+            collection.remove(k);
+        });
+
+        self.inserts.clear();
+        self.inserts.shrink_to_fit();
+        self.updates.clear();
+        self.updates.shrink_to_fit();
+        self.deletes.clear();
+        self.deletes.shrink_to_fit();
+        //rebuild index
+        self.index.build();
     }
 }
 
@@ -141,13 +162,16 @@ impl Index {
         });
         let mut idx = Index {
             indexer,
-            collection,
+            ws : collection.clone(),
+            rs : collection.clone(),
         };
+        drop(collection);
         idx.build();
         idx
     }
 
     pub fn insert(&mut self, k: String, v: Value) {
+
         match &self.indexer {
             Indexer::Json(j) => {
                 let mut found = 0;
@@ -158,23 +182,23 @@ impl Index {
                     }
                 });
                 if found == j.path_orders.len() {
-                    self.collection.insert(k,v);
+                    self.write().insert(k,v);
                 }
             }
             Indexer::Integer(_) => {
                 if v.is_i64() {
-                    self.collection.insert(k,v);
+                    self.write().insert(k,v);
                 }
 
             }
             Indexer::Float(_) => {
                 if v.is_f64() {
-                    self.collection.insert(k,v);
+                    self.write().insert(k,v);
                 }
             }
             Indexer::String(_) => {
                 if v.is_string() {
-                    self.collection.insert(k,v);
+                    self.write().insert(k,v);
                 }
             }
         };
@@ -182,19 +206,31 @@ impl Index {
     }
 
     pub fn remove(&mut self, k : &String){
-        self.collection.remove(k);
+        self.write().remove(k);
     }
 
     pub fn batch( &mut self, f : fn(&mut Batch) ){
         let mut batch = Batch::new(self);
-        f(&mut batch)
+        f(&mut batch);
+    }
+
+    pub fn read(&self) -> &IndexMap<String,Value> {
+        &self.rs
+    }
+
+
+    pub fn write(&mut self) -> &mut IndexMap<String,Value> {
+        &mut self.ws
     }
 
 
     fn build(&mut self) {
-        match &self.indexer {
+        let mut indexer = self.indexer.clone();
+        match indexer {
+
             Indexer::Json(j) => {
-                self.collection.par_sort_by(|_, lhs, _, rhs| {
+
+                self.write().par_sort_by(|_, lhs, _, rhs| {
                     let ordering: Vec<Ordering> = j.path_orders.iter().map(|path_order| {
                         let lvalue = lhs.dot_get_or(&path_order.path, Value::Null).unwrap_or(Value::Null);
 
@@ -239,7 +275,7 @@ impl Index {
                 });
             }
             Indexer::Integer(i) => {
-                self.collection.par_sort_by(|_, lhs, _, rhs| {
+                self.write().par_sort_by(|_, lhs, _, rhs| {
                     let lvalue = lhs.as_i64().unwrap_or(0);
                     let rvalue = rhs.as_i64().unwrap_or(0);
                     match i.ordering {
@@ -253,7 +289,7 @@ impl Index {
                 });
             }
             Indexer::Float(f) => {
-                self.collection.par_sort_by(|_, lhs, _, rhs| {
+                self.write().par_sort_by(|_, lhs, _, rhs| {
                     let lvalue = lhs.as_f64().unwrap_or(0.0);
                     let rvalue = rhs.as_f64().unwrap_or(0.0);
 
@@ -268,7 +304,7 @@ impl Index {
                 });
             }
             Indexer::String(s) => {
-                self.collection.par_sort_by(|_, lhs, _, rhs| {
+                self.write().par_sort_by(|_, lhs, _, rhs| {
                     let lvalue = lhs.as_str().unwrap_or("");
                     let rvalue = rhs.as_str().unwrap_or("");
                     match s.ordering {
@@ -282,6 +318,7 @@ impl Index {
                 });
             }
         }
+        self.rs.clone_from(&self.ws)
     }
 }
 
