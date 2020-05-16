@@ -132,6 +132,7 @@ impl<'a> BatchTransaction for Batch<'a> {
 
 
 impl Index {
+    ///
     pub fn new(indexer: Indexer, items: IndexMap<String, Value>) -> Self {
         let mut items = &mut items.clone();
         let filtered: IndexMap<&String, &Value> = match &indexer {
@@ -244,7 +245,6 @@ impl Index {
     pub fn read(&self) -> &IndexMap<String,Value> {
         &self.rs
     }
-
 
     fn build(&mut self) {
         let mut indexer = self.indexer.clone();
