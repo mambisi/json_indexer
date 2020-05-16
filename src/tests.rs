@@ -88,7 +88,9 @@ fn it_works() {
 }
 
 
+
 /*
+
 #[test]
 fn test_shared_state() {
     env::set_var("RUST_LOG", "debug");

@@ -1,5 +1,3 @@
-
-
 extern crate ordered_float;
 extern crate indexmap;
 #[macro_use]
@@ -12,7 +10,7 @@ extern crate log;
 
 use ordered_float::OrderedFloat;
 use indexmap::map::IndexMap;
-use serde_json::{Value};
+use serde_json::Value;
 use json_dotpath::DotPaths;
 use std::cmp::Ordering;
 use rayon::prelude::*;
@@ -22,43 +20,50 @@ use std::sync::{Mutex, RwLock, Arc};
 use std::borrow::Borrow;
 use std::ops::{DerefMut, Deref};
 
-#[derive(Serialize, Deserialize,Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 pub enum Indexer {
     Json(IndexJson),
     Integer(IndexInt),
     Float(IndexFloat),
     String(IndexString),
 }
+
 #[derive(Serialize, Deserialize, Clone)]
 pub enum IndexOrd {
     ASC,
     DESC,
 }
+
 #[derive(Serialize, Deserialize, Clone)]
 pub struct IndexInt {
     pub ordering: IndexOrd
 }
+
 #[derive(Serialize, Deserialize, Clone)]
 pub struct IndexString {
     pub ordering: IndexOrd
 }
+
 #[derive(Serialize, Deserialize, Clone)]
 pub struct IndexFloat {
     pub ordering: IndexOrd
 }
+
 #[derive(Serialize, Deserialize, Clone)]
 pub struct IndexJson {
     pub path_orders: Vec<JsonPathOrder>
 }
+
 #[derive(Serialize, Deserialize, Clone)]
 pub struct JsonPathOrder {
     pub path: String,
     pub ordering: IndexOrd,
 }
+
 #[derive(Serialize, Deserialize, Clone)]
 pub struct Index {
     pub indexer: Indexer,
-    rs: IndexMap<String,Value>,
+    rs: IndexMap<String, Value>,
     ws: Arc<RwLock<IndexMap<String, Value>>>,
 }
 
@@ -70,30 +75,82 @@ trait BatchTransaction {
 }
 
 pub struct Batch<'a> {
-    index : &'a mut Index,
-    inserts : HashMap<String, Value>,
-    updates : HashMap<String, Value>,
-    deletes : HashSet<String>
+    index: &'a mut Index,
+    inserts: HashMap<String, Value>,
+    updates: HashMap<String, Value>,
+    deletes: HashSet<String>,
 }
 
-impl<'a > Batch<'a> {
-    fn new( idx : &'a mut Index) -> Self {
+impl<'a> Batch<'a> {
+    fn new(idx: &'a mut Index) -> Self {
         Batch {
             index: idx,
             inserts: HashMap::new(),
             updates: HashMap::new(),
-            deletes: HashSet::new()
+            deletes: HashSet::new(),
+        }
+    }
+
+    fn filter(&'a self, k : &'a String, v : &'a Value) -> Result<(&'a String, &'a Value),()> {
+        let indexer = self.index.indexer.clone();
+        match indexer {
+            Indexer::Json(j) => {
+                let mut found = 0;
+                j.path_orders.iter().for_each(|p| {
+                    let value = v.dot_get_or(&p.path, Value::Null).unwrap_or(Value::Null);
+                    if !value.is_null() {
+                        found += 1
+                    }
+                });
+                if found == j.path_orders.len() {
+                    Ok((k,v))
+                }else {
+                    Err(())
+                }
+            }
+            Indexer::Integer(_) => {
+                if v.is_i64() {
+                    Ok((k,v))
+                }
+                else {
+                    Err(())
+                }
+            }
+            Indexer::Float(_) => {
+                if v.is_f64() {
+                    Ok((k,v))
+                }else {
+                    Err(())
+                }
+            }
+            Indexer::String(_) => {
+                if v.is_string() {
+                    Ok((k,v))
+                }else {
+                    Err(())
+                }
+            }
         }
     }
 }
 
 impl<'a> BatchTransaction for Batch<'a> {
     fn insert(&mut self, k: String, v: Value) {
-        self.inserts.insert(k,v);
+        match self.filter(&k, &v) {
+            Ok((k,v)) => {
+                self.inserts.insert(k.to_owned(), v.clone());
+            },
+            Err(_) => {},
+        };
     }
 
     fn update(&mut self, k: String, v: Value) {
-        self.updates.insert(k,v);
+        match self.filter(&k, &v) {
+            Ok((k,v)) => {
+                self.updates.insert(k.to_owned(), v.clone());
+            },
+            Err(_) => {},
+        };
     }
 
     fn delete(&mut self, k: String) {
@@ -101,18 +158,17 @@ impl<'a> BatchTransaction for Batch<'a> {
     }
 
     fn commit(&mut self) {
-
-        self.inserts.iter().for_each(|(k,v)|{
+        self.inserts.iter().for_each(|(k, v)| {
             let mut collection = self.index.ws.write().unwrap();
-           collection.insert(k.to_string(),v.clone());
+            collection.insert(k.to_string(),v.clone());
         });
-        self.updates.iter().for_each(|(k,v)| {
+        self.updates.iter().for_each(|(k, v)| {
             let mut collection = self.index.ws.write().unwrap();
             if collection.contains_key(k) {
                 collection.insert(k.to_string(),v.clone());
             }
         });
-        self.deletes.iter().for_each(|k|{
+        self.deletes.iter().for_each(|k| {
             let mut collection = self.index.ws.write().unwrap();
             collection.remove(k);
         });
@@ -128,6 +184,8 @@ impl<'a> BatchTransaction for Batch<'a> {
             self.index.build();
         }
     }
+
+
 }
 
 
@@ -156,7 +214,6 @@ impl Index {
             Indexer::Float(_) => {
                 items.iter().filter(|(_, v)| {
                     v.is_f64()
-
                 }).collect()
             }
             Indexer::String(_) => {
@@ -165,16 +222,16 @@ impl Index {
                 }).collect()
             }
         };
-        let mut collection : IndexMap<String,Value> = IndexMap::new();
+        let mut collection: IndexMap<String, Value> = IndexMap::new();
 
-        filtered.iter().for_each(|(k,v)| {
+        filtered.iter().for_each(|(k, v)| {
             &collection.insert(k.to_string(), v.clone().clone());
         });
 
         let mut idx = Index {
             indexer,
-            ws : Arc::new(RwLock::new(collection.clone())),
-            rs : collection.clone(),
+            ws: Arc::new(RwLock::new(collection.clone())),
+            rs: collection.clone(),
         };
         drop(collection);
         idx.build();
@@ -182,10 +239,23 @@ impl Index {
     }
 
     pub fn insert(&mut self, k: String, v: Value) {
+        match self.filter(&k,&v) {
+            Ok(e) => {
+                let mut collection = self.ws.write().unwrap();
+                let (key,value) = e;
+                collection.insert(key.to_string(),value.clone());
+            },
+            Err(_) => {},
+        }
+        {
+            self.build();
+        }
+    }
 
+
+    fn filter<'a>(&mut self, k : &'a String, v : &'a Value) -> Result<(&'a String, &'a Value),()> {
         match &self.indexer {
             Indexer::Json(j) => {
-                let mut collection = self.ws.write().unwrap();
                 let mut found = 0;
                 j.path_orders.iter().for_each(|p| {
                     let value = v.dot_get_or(&p.path, Value::Null).unwrap_or(Value::Null);
@@ -194,64 +264,62 @@ impl Index {
                     }
                 });
                 if found == j.path_orders.len() {
-
-                    collection.insert(k,v);
+                    Ok((k,v))
+                }else {
+                    Err(())
                 }
             }
             Indexer::Integer(_) => {
-                let mut collection = self.ws.write().unwrap();
                 if v.is_i64() {
-                    collection.insert(k,v);
+                    Ok((k,v))
                 }
-
+                else {
+                    Err(())
+                }
             }
             Indexer::Float(_) => {
-                let mut collection = self.ws.write().unwrap();
                 if v.is_f64() {
-                    collection.insert(k,v);
+                    Ok((k,v))
+                }else {
+                    Err(())
                 }
             }
             Indexer::String(_) => {
-                let mut collection = self.ws.write().unwrap();
                 if v.is_string() {
-                    collection.insert(k,v);
+                    Ok((k,v))
+                }else {
+                    Err(())
                 }
             }
-        };
-        {
-            self.build();
         }
-
     }
 
-    pub fn remove(&mut self, k : &String){
-        let mut  write_side = self.ws.write().unwrap();
+    pub fn remove(&mut self, k: &String) {
+        let mut write_side = self.ws.write().unwrap();
         write_side.remove(k);
     }
 
-    pub fn batch( &mut self, f : impl Fn(&mut Batch) + std::marker::Sync + std::marker::Send){
+    pub fn batch(&mut self, f: impl Fn(&mut Batch) + std::marker::Sync + std::marker::Send) {
         let mut batch = Batch::new(self);
         f(&mut batch);
     }
 
-    pub fn iter(&self, f : impl Fn((&String,&Value)) + std::marker::Sync + std::marker::Send){
+    pub fn iter(&self, f: impl Fn((&String, &Value)) + std::marker::Sync + std::marker::Send) {
         self.rs.iter().for_each(f);
     }
 
-    pub fn par_iter(&self, f : impl Fn((&String,&Value)) + std::marker::Sync + std::marker::Send){
+    pub fn par_iter(&self, f: impl Fn((&String, &Value)) + std::marker::Sync + std::marker::Send) {
         self.rs.par_iter().for_each(f);
     }
 
-    pub fn read(&self) -> &IndexMap<String,Value> {
+    pub fn read(&self) -> &IndexMap<String, Value> {
         &self.rs
     }
 
     fn build(&mut self) {
         let mut indexer = self.indexer.clone();
         match indexer {
-
             Indexer::Json(j) => {
-
                 self.ws.write().unwrap().par_sort_by(|_, lhs, _, rhs| {
                     let ordering: Vec<Ordering> = j.path_orders.iter().map(|path_order| {
                         let lvalue = lhs.dot_get_or(&path_order.path, Value::Null).unwrap_or(Value::Null);
