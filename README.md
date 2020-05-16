@@ -1,6 +1,6 @@
 # Json Index
 
-This crate allows you to create an index (a sorted map) based with serde json values.
+This crate allows you to create an index (a multi-value sorted map) based on serde json values.
 
 ## Example
 
