@@ -91,7 +91,7 @@ impl<'a> Batch<'a> {
         }
     }
 
-    fn filter(&'a self, k : &'a String, v : &'a Value) -> Result<(&'a String, &'a Value),()> {
+    fn filter(&'a self, k: &'a String, v: &'a Value) -> Result<(&'a String, &'a Value), ()> {
         let indexer = self.index.indexer.clone();
         match indexer {
             Indexer::Json(j) => {
@@ -103,30 +103,29 @@ impl<'a> Batch<'a> {
                     }
                 });
                 if found == j.path_orders.len() {
-                    Ok((k,v))
-                }else {
+                    Ok((k, v))
+                } else {
                     Err(())
                 }
             }
             Indexer::Integer(_) => {
                 if v.is_i64() {
-                    Ok((k,v))
-                }
-                else {
+                    Ok((k, v))
+                } else {
                     Err(())
                 }
             }
             Indexer::Float(_) => {
                 if v.is_f64() {
-                    Ok((k,v))
-                }else {
+                    Ok((k, v))
+                } else {
                     Err(())
                 }
             }
             Indexer::String(_) => {
                 if v.is_string() {
-                    Ok((k,v))
-                }else {
+                    Ok((k, v))
+                } else {
                     Err(())
                 }
             }
@@ -137,19 +136,19 @@ impl<'a> Batch<'a> {
 impl<'a> BatchTransaction for Batch<'a> {
     fn insert(&mut self, k: String, v: Value) {
         match self.filter(&k, &v) {
-            Ok((k,v)) => {
+            Ok((k, v)) => {
                 self.inserts.insert(k.to_owned(), v.clone());
-            },
-            Err(_) => {},
+            }
+            Err(_) => {}
         };
     }
 
     fn update(&mut self, k: String, v: Value) {
         match self.filter(&k, &v) {
-            Ok((k,v)) => {
+            Ok((k, v)) => {
                 self.updates.insert(k.to_owned(), v.clone());
-            },
-            Err(_) => {},
+            }
+            Err(_) => {}
         };
     }
 
@@ -160,12 +159,12 @@ impl<'a> BatchTransaction for Batch<'a> {
     fn commit(&mut self) {
         self.inserts.iter().for_each(|(k, v)| {
             let mut collection = self.index.ws.write().unwrap();
-            collection.insert(k.to_string(),v.clone());
+            collection.insert(k.to_string(), v.clone());
         });
         self.updates.iter().for_each(|(k, v)| {
             let mut collection = self.index.ws.write().unwrap();
             if collection.contains_key(k) {
-                collection.insert(k.to_string(),v.clone());
+                collection.insert(k.to_string(), v.clone());
             }
         });
         self.deletes.iter().for_each(|k| {
@@ -184,13 +183,17 @@ impl<'a> BatchTransaction for Batch<'a> {
             self.index.build();
         }
     }
-
-
 }
 
 
 impl Index {
-    ///
+    /// # Creates a new Index
+    /// ## Example
+    /// ```rust
+    /// let string_indexer = Indexer::String(IndexString {
+    ///     ordering: IndexOrd::ASC
+    ///   });
+    /// ```
     pub fn new(indexer: Indexer) -> Self {
         let mut collection: IndexMap<String, Value> = IndexMap::new();
         let mut idx = Index {
@@ -203,14 +206,15 @@ impl Index {
         idx
     }
 
+    /// Inserts a new entry or overrides a previous entry in the index
     pub fn insert(&mut self, k: String, v: Value) {
-        match self.filter(&k,&v) {
+        match self.filter(&k, &v) {
             Ok(e) => {
                 let mut collection = self.ws.write().unwrap();
-                let (key,value) = e;
-                collection.insert(key.to_string(),value.clone());
-            },
-            Err(_) => {},
+                let (key, value) = e;
+                collection.insert(key.to_string(), value.clone());
+            }
+            Err(_) => {}
         }
         {
             self.build();
@@ -218,7 +222,7 @@ impl Index {
     }
 
 
-    fn filter<'a>(&mut self, k : &'a String, v : &'a Value) -> Result<(&'a String, &'a Value),()> {
+    fn filter<'a>(&mut self, k: &'a String, v: &'a Value) -> Result<(&'a String, &'a Value), ()> {
         match &self.indexer {
             Indexer::Json(j) => {
                 let mut found = 0;
@@ -229,41 +233,53 @@ impl Index {
                     }
                 });
                 if found == j.path_orders.len() {
-                    Ok((k,v))
-                }else {
+                    Ok((k, v))
+                } else {
                     Err(())
                 }
             }
             Indexer::Integer(_) => {
                 if v.is_i64() {
-                    Ok((k,v))
-                }
-                else {
+                    Ok((k, v))
+                } else {
                     Err(())
                 }
             }
             Indexer::Float(_) => {
                 if v.is_f64() {
-                    Ok((k,v))
-                }else {
+                    Ok((k, v))
+                } else {
                     Err(())
                 }
             }
             Indexer::String(_) => {
                 if v.is_string() {
-                    Ok((k,v))
-                }else {
+                    Ok((k, v))
+                } else {
                     Err(())
                 }
             }
         }
     }
 
+    /// Removes an entry from the index
     pub fn remove(&mut self, k: &String) {
         let mut write_side = self.ws.write().unwrap();
         write_side.remove(k);
     }
 
+    /// Batch transaction on the index. you can insert/update/delete multiple entries with one operation by commit the operation with ```b.commit()```
+    /// Example
+    /// ```rust
+    /// let mut names_index = Index::new(string_indexer);
+    ///     names_index.batch(|b| {
+    ///        b.delete("user.4".to_owned());
+    ///        b.insert("user.1".to_owned(), Value::String("Kwadwo".to_string()));
+    ///        b.insert("user.2".to_owned(), Value::String("Kwame".to_string()));
+    ///        b.update("user.3".to_owned(), Value::String("Joseph".to_string()));
+    ///        b.commit()
+    ///    });
+    /// ```
     pub fn batch(&mut self, f: impl Fn(&mut Batch) + std::marker::Sync + std::marker::Send) {
         let mut batch = Batch::new(self);
         f(&mut batch);

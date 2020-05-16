@@ -6,23 +6,18 @@ This crate allows you to create an index (a sorted map) based with serde json va
 
 Single index
 ```rust
-    let mut names = HashMap::new();
-    names.insert("user.1".to_owned(), Value::String("Kwadwo".to_string()));
-    names.insert("user.2".to_owned(), Value::String("Kwame".to_string()));
-    names.insert("user.3".to_owned(), Value::String("Joseph".to_string()));
-    names.insert("user.4".to_owned(), Value::String("Jake".to_string()));
-    names.insert("user.5".to_owned(), Value::String("Mambisi".to_string()));
-    names.insert("user.6".to_owned(), Value::String("Ama".to_string()));
-
     let string_indexer = Indexer::String(IndexString {
         ordering: IndexOrd::ASC
     });
 
     let mut names_index = Index::new(string_indexer);
     names_index.batch(|b| {
-        &names.iter().for_each(|(k, v)| {
-            b.insert(k.to_owned(), v.clone());
-        });
+        b.insert("user.1".to_owned(), Value::String("Kwadwo".to_string()));
+        b.insert("user.2".to_owned(), Value::String("Kwame".to_string()));
+        b.insert("user.3".to_owned(), Value::String("Joseph".to_string()));
+        b.insert("user.4".to_owned(), Value::String("Jake".to_string()));
+        b.insert("user.5".to_owned(), Value::String("Mambisi".to_string()));
+        b.insert("user.6".to_owned(), Value::String("Ama".to_string()));
         b.commit()
     });
 
