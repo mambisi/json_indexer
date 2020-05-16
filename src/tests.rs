@@ -22,7 +22,7 @@ fn it_works() {
     });
     students.insert("student:1".to_owned(), Student {
         name: "Joseph".to_owned(),
-        age: 13,
+        age: 12,
         grade: 3.1,
     });
     students.insert("student:2".to_owned(), Student {
@@ -42,7 +42,7 @@ fn it_works() {
     };
 
     let indexer = Indexer::Json(IndexJson {
-        path_orders: vec![age_order, name_order]
+        path_orders: vec![name_order, age_order]
     });
 
     let mut items: IndexMap<String, Value> = IndexMap::new();
