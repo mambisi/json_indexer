@@ -3,7 +3,7 @@
 This crate allows you to create an index (a sorted map) based with serde json values.
 
 ## Example
-````rust
+```rust
     let mut students: HashMap<String, Student> = HashMap::new();
     students.insert("student:0".to_owned(), Student {
         name: "Mambisi".to_owned(),
@@ -67,4 +67,4 @@ This crate allows you to create an index (a sorted map) based with serde json va
 "student:4": Object({"age": Number(11), "grade": Number(3.1), "name": String("Bug"), "photo": Object({"id": String("2121"), "url": String("example.com")})})
 }
 */
-````
+```
