@@ -6,7 +6,7 @@ This crate allows you to create an index (a sorted map) based with serde json va
 
 Single index
 ```rust
-    let mut names = IndexMap::new();
+    let mut names = HashMap::new();
     names.insert("user.1".to_owned(), Value::String("Kwadwo".to_string()));
     names.insert("user.2".to_owned(), Value::String("Kwame".to_string()));
     names.insert("user.3".to_owned(), Value::String("Joseph".to_string()));
@@ -18,8 +18,14 @@ Single index
         ordering: IndexOrd::ASC
     });
 
-    let names_index = Index::new(string_indexer, names);
-    println!("{:?}", names_index.read());
+    let mut names_index = Index::new(string_indexer);
+    names_index.batch(|b| {
+        &names.iter().for_each(|(k, v)| {
+            b.insert(k.to_owned(), v.clone());
+        });
+        b.commit()
+    });
+
 /*outputs
 {
     "user.6": String("Ama"),
@@ -65,27 +71,13 @@ Multi index with dot path
         path_orders: vec![name_order, age_order]
     });
 
-    let mut items: IndexMap<String, Value> = IndexMap::new();
-
-    students.into_iter().for_each(|(k, v)| {
-        let json = serde_json::to_value(v).unwrap_or(Value::Null);
-        items.insert(k, json);
-    });
-
-    let mut index = Index::new(indexer, items);
+    let mut index = Index::new(indexer);
 
     index.batch(|b| {
-        b.insert("student:4".to_string(), json!(
-            {
-            "name": "Bug",
-            "age" : 11,
-            "grade": 3.1,
-            "photo" : {
-                "id" : "2121",
-                "url" : "example.com"
-                }
-            }
-        ));
+        &students.iter().for_each(|(k, v)| {
+            let json = serde_json::to_value(v).unwrap_or(Value::Null);
+            b.insert(k.to_owned(), json);
+        });
         b.commit()
     });
 

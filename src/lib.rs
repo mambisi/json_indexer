@@ -191,43 +191,8 @@ impl<'a> BatchTransaction for Batch<'a> {
 
 impl Index {
     ///
-    pub fn new(indexer: Indexer, items: IndexMap<String, Value>) -> Self {
-        let mut items = &mut items.clone();
-        let filtered: IndexMap<&String, &Value> = match &indexer {
-            Indexer::Json(j) => {
-                items.iter().filter(|(_, v)| {
-                    let mut found = 0;
-                    j.path_orders.iter().for_each(|p| {
-                        let value = v.dot_get_or(&p.path, Value::Null).unwrap_or(Value::Null);
-                        if !value.is_null() {
-                            found += 1
-                        }
-                    });
-                    found == j.path_orders.len()
-                }).collect()
-            }
-            Indexer::Integer(_) => {
-                items.iter().filter(|(_, v)| {
-                    v.is_i64()
-                }).collect()
-            }
-            Indexer::Float(_) => {
-                items.iter().filter(|(_, v)| {
-                    v.is_f64()
-                }).collect()
-            }
-            Indexer::String(_) => {
-                items.iter().filter(|(_, v)| {
-                    v.is_string()
-                }).collect()
-            }
-        };
+    pub fn new(indexer: Indexer) -> Self {
         let mut collection: IndexMap<String, Value> = IndexMap::new();
-
-        filtered.iter().for_each(|(k, v)| {
-            &collection.insert(k.to_string(), v.clone().clone());
-        });
-
         let mut idx = Index {
             indexer,
             ws: Arc::new(RwLock::new(collection.clone())),
