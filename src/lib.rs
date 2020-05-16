@@ -5,8 +5,7 @@ extern crate serde;
 #[macro_use]
 extern crate serde_json;
 extern crate rayon;
-#[macro_use]
-extern crate log;
+
 
 use ordered_float::OrderedFloat;
 use indexmap::map::IndexMap;
@@ -67,7 +66,7 @@ pub struct Index {
     ws: Arc<RwLock<IndexMap<String, Value>>>,
 }
 
-trait BatchTransaction {
+pub trait BatchTransaction {
     fn insert(&mut self, k: String, v: Value);
     fn update(&mut self, k: String, v: Value);
     fn delete(&mut self, k: String);
@@ -190,6 +189,7 @@ impl Index {
     /// # Creates a new Index
     /// ## Example
     /// ```rust
+    /// use indexer::{Indexer, IndexString, IndexOrd};
     /// let string_indexer = Indexer::String(IndexString {
     ///     ordering: IndexOrd::ASC
     ///   });
@@ -271,6 +271,8 @@ impl Index {
     /// Batch transaction on the index. you can insert/update/delete multiple entries with one operation by commit the operation with ```b.commit()```
     /// Example
     /// ```rust
+    /// use indexer::{Index, BatchTransaction};
+    /// use serde_json::Value;
     /// let mut names_index = Index::new(string_indexer);
     ///     names_index.batch(|b| {
     ///        b.delete("user.4".to_owned());
@@ -393,5 +395,8 @@ impl Index {
     }
 }
 
+#[cfg(test)]
+#[macro_use]
+extern crate log;
 #[cfg(test)]
 mod tests;
