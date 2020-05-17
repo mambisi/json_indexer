@@ -4,7 +4,7 @@
 multi value indexer for a json object.
 
 this crate allows to create a sorted map of json objects based on the dot path, its similar to what a database like mongodb
-will generate and index based on the path given, this crate is meant to be used in create no sql database. this crate was 
+will generate and index based on the path given, this crate is meant to be used in creating no sql databases. This library was 
 created to be used as indexing structure for [escanordb](https://github.com/mambisi/escanor).
 
 ## Road to 0.2 :  TODO
