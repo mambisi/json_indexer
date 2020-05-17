@@ -15,6 +15,10 @@ created to be used as indexing structure for [escanordb](https://github.com/mamb
 - [X] Compound queries
 - [ ] Order by
 
+## Version 0.1.5
+Features
+- Basic queries check below for documentation
+
 ## Example
 
 Single index
