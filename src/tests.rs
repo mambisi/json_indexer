@@ -11,7 +11,7 @@ struct Student {
     name: String,
     age: u8,
     state: String,
-    grade: f64,
+    gpa: f64,
 }
 
 #[test]
@@ -21,23 +21,37 @@ fn it_works() {
         name: "Mambisi".to_owned(),
         age: 21,
         state : "CA".to_owned(),
-        grade: 3.1,
+        gpa: 3.1,
     });
     students.insert("student:1".to_owned(), Student {
         name: "Joseph".to_owned(),
         age: 12,
         state : "CA".to_owned(),
-        grade: 3.1,
+        gpa: 3.1,
     });
     students.insert("student:2".to_owned(), Student {
         name: "Elka".to_owned(),
         age: 12,
         state : "FL".to_owned(),
-        grade: 4.0,
+        gpa: 4.0,
     });
 
-    let age_order = JsonPathOrder {
-        path: "age".to_string(),
+    students.insert("student:18".to_owned(), Student {
+        name: "Alex".to_owned(),
+        age: 15,
+        state : "NY".to_owned(),
+        gpa: 3.7,
+    });
+
+    students.insert("student:18".to_owned(), Student {
+        name: "Jackson".to_owned(),
+        age: 17,
+        state : "NY".to_owned(),
+        gpa: 3.8,
+    });
+
+    let gpa_order = JsonPathOrder {
+        path: "gpa".to_string(),
         ordering: IndexOrd::DESC,
     };
 
@@ -46,13 +60,18 @@ fn it_works() {
         ordering: IndexOrd::ASC,
     };
 
+    let state_order = JsonPathOrder {
+        path: "state".to_string(),
+        ordering: IndexOrd::ASC,
+    };
+
     let indexer = Indexer::Json(IndexJson {
-        path_orders: vec![name_order, age_order]
+        path_orders: vec![name_order, gpa_order, state_order]
     });
 
-    let mut index = Index::new(indexer);
+    let mut students_index = Index::new(indexer);
 
-    index.batch(|b| {
+    students_index.batch(|b| {
         &students.iter().for_each(|(k, v)| {
             let json = serde_json::to_value(v).unwrap_or(Value::Null);
             b.insert(k.to_owned(), json);
@@ -60,8 +79,13 @@ fn it_works() {
         b.commit()
     });
 
-    println!("{:?}", index.read());
+    println!("{:?}", students_index.read());
 
+    let query = students_index.find_all("state", "eq", Value::String("CA".to_string()));
+    println!("Find all students in CA: {:?}", query.read());
+
+    let query = students_index.find_all("gpa", "gt", Value::from(3.5));
+    println!("Find all students whose gpa greater than 3.5: {:?}", query.read());
 
     let string_indexer = Indexer::String(IndexString {
         ordering: IndexOrd::ASC
@@ -80,8 +104,8 @@ fn it_works() {
     });
 
     println!("{:?}", names_index.read());
-    let res = names_index.select_where("*", QueryOperator::EQ, Value::String("Kwadwo".to_string()));
-    println!("Student with name kwadwo {:?}", res.read());
+    let res = names_index.find_all("*", "like", Value::String("k*".to_string()));
+    println!("users whose name starts with K: {:?}", res.read());
 
 }
 
