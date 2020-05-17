@@ -13,6 +13,9 @@ Single index
 
 > This example demonstrates how you can use json indexer to index a json value
 ```rust
+    use indexer::{Indexer, IndexString, Index, IndexOrd, BatchTransaction};
+    use serde_json::Value;
+
     let string_indexer = Indexer::String(IndexString {
         ordering: IndexOrd::ASC
     });
@@ -43,6 +46,10 @@ Single index
 Multi index with dot path
 > This example demonstrates how you can use json indexer to index a full json object using multiple dot paths
 ```rust
+    use std::collections::HashMap;
+    use indexer::{JsonPathOrder, IndexOrd, Indexer, IndexJson, Index, BatchTransaction};
+    use serde_json::Value;
+
     let mut students: HashMap<String, Student> = HashMap::new();
     students.insert("student:0".to_owned(), Student {
         name: "Mambisi".to_owned(),
