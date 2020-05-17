@@ -129,6 +129,7 @@ use std::borrow::Borrow;
 use std::ops::{DerefMut, Deref};
 use multimap::MultiMap;
 use std::hash::{Hash, Hasher};
+use std::collections::hash_map::RandomState;
 
 #[derive(Serialize, Deserialize, Clone)]
 pub enum Indexer {
@@ -203,9 +204,9 @@ impl Eq for FloatKey {}
 #[derive(Serialize, Deserialize, Clone)]
 pub struct Index {
     pub indexer: Indexer,
-    int_tree: Arc<RwLock<MultiMap<i64, (String, Value)>>>,
-    str_tree: Arc<RwLock<MultiMap<String, (String, Value)>>>,
-    float_tree: Arc<RwLock<MultiMap<FloatKey, (String, Value)>>>,
+    int_tree: Arc<RwLock<HashMap<String,MultiMap<i64, (String, Value)>>>>,
+    str_tree: Arc<RwLock<HashMap<String,MultiMap<String, (String, Value)>>>>,
+    float_tree: Arc<RwLock<HashMap<String,MultiMap<FloatKey, (String, Value)>>>>,
     rs: IndexMap<String, Value>,
     ws: Arc<RwLock<IndexMap<String, Value>>>,
 
@@ -345,9 +346,9 @@ impl<'a> Index {
             indexer,
             ws: Arc::new(RwLock::new(collection.clone())),
             rs: collection.clone(),
-            int_tree: Arc::new(RwLock::new(MultiMap::new())),
-            str_tree: Arc::new(RwLock::new(MultiMap::new())),
-            float_tree: Arc::new(RwLock::new(MultiMap::new())),
+            int_tree: Arc::new(RwLock::new(HashMap::new())),
+            str_tree: Arc::new(RwLock::new(HashMap::new())),
+            float_tree: Arc::new(RwLock::new(HashMap::new())),
         };
         drop(collection);
         idx.build();
@@ -402,89 +403,74 @@ impl<'a> Index {
         self.rs.par_iter().for_each(f);
     }
 
-    pub fn select_where(&self, field: &str, op: QueryOperator, other: Value) -> Result<Index, String> {
+    pub fn select_where(&self, field: &str, op: QueryOperator, other: Value) -> Index {
         let mut indexer = self.indexer.clone();
         let matches = match &indexer {
             Indexer::Json(j) => {
-                let mut field_dot_path = "";
-                j.path_orders.iter().map(|k| {
-                    if k.path == field {
-                        field_dot_path = field
-                    }
-                });
-                if field_dot_path.is_empty() {
-                    return Err(String::from("Field not indexed"));
-                }
 
                 if other.is_i64() {
                     let q = other.as_i64().unwrap();
-                    self.query_int_index(q,op)
+                    self.query_int_index(field,q,op)
                 } else if other.is_f64() {
                     let q = other.as_f64().unwrap();
-                    self.query_float_index(q,op)
+                    self.query_float_index(field,q,op)
                 } else if other.is_string() {
                     let q = String::from(other.as_str().unwrap());
-                    self.query_string_index(q,op)
+                    self.query_string_index(field,q,op)
                 } else {
                     vec![]
                 }
             }
             Indexer::Integer(i) => {
-                if field.is_empty() || !field.eq("*") {
-                    return Err(String::from("Field not indexed"));
-                }
                 let q = other.as_i64().unwrap();
-                self.query_int_index(q,op)
+                self.query_int_index(field,q,op)
             }
             Indexer::Float(f) => {
-                if field.is_empty() || !field.eq("*") {
-                    return Err(String::from("Field not indexed"));
-                }
                 let q = other.as_f64().unwrap();
-                self.query_float_index(q,op)
+                self.query_float_index(field,q,op)
             }
             Indexer::String(s) => {
-                if field.is_empty() || !field.eq("*") {
-                    return Err(String::from("Field not indexed"));
-                }
                 let q = String::from(other.as_str().unwrap());
-                self.query_string_index(q,op)
+                self.query_string_index(field,q,op)
             }
         };
 
         let mut new_index = Index::new(indexer);
+
         new_index.batch(|b|{
             matches.iter().for_each(|(k,v)|{
                 b.insert(k.to_owned(),v.clone())
             });
             b.commit()
         });
-        Ok(new_index)
+
+        new_index
 
     }
 
-    fn query_int_index(&self, q: i64, op: QueryOperator) -> Vec<(String, Value)> {
+    fn query_int_index(&self,key : &str, q: i64, op: QueryOperator) -> Vec<(String, Value)> {
+        let empty_map = MultiMap::new();
         let empty_matches: Vec<(String, Value)> = Vec::new();
-        let mut int_tree_reader = self.int_tree.write().unwrap();
-
+        let read_guard = self.int_tree.read().unwrap();
+        let int_tree_reader = read_guard.get(key).unwrap_or(&empty_map);
         match op {
             QueryOperator::EQ => {
                 int_tree_reader.get_vec(&q).unwrap_or(&empty_matches).to_vec()
             }
             QueryOperator::LT => {
                 let mut matches: Vec<(String, Value)> = vec![];
-                int_tree_reader.iter_all_mut().for_each(|(k, v)| {
+                int_tree_reader.iter_all().for_each(|(k, v)| {
                     if k.lt(&q) {
-                        matches.append(v)
+                        matches.extend_from_slice(v)
                     }
                 });
                 matches
             }
             QueryOperator::GT => {
                 let mut matches = vec![];
-                int_tree_reader.iter_all_mut().for_each(|(k, v)| {
+                int_tree_reader.iter_all().for_each(|(k, v)| {
                     if k.gt(&q) {
-                        matches.append(v)
+                        matches.extend_from_slice(v)
                     }
                 });
                 matches
@@ -492,8 +478,10 @@ impl<'a> Index {
         }
     }
 
-    fn query_float_index(&self, q: f64, op: QueryOperator) -> Vec<(String, Value)> {
-        let mut float_tree_reader = self.float_tree.write().unwrap();
+    fn query_float_index(&self,key : &str, q: f64, op: QueryOperator) -> Vec<(String, Value)> {
+        let empty_map = MultiMap::new();
+        let read_guard =self.float_tree.read().unwrap();
+        let mut float_tree_reader = read_guard.get(key).unwrap_or(&empty_map);
         let empty_matches: Vec<(String, Value)> = Vec::new();
         match op {
             QueryOperator::EQ => {
@@ -501,18 +489,18 @@ impl<'a> Index {
             }
             QueryOperator::LT => {
                 let mut matches: Vec<(String, Value)> = vec![];
-                float_tree_reader.iter_all_mut().for_each(|(k, v)| {
+                float_tree_reader.iter_all().for_each(|(k, v)| {
                     if k.0.lt(&q) {
-                        matches.append(v)
+                        matches.extend_from_slice(v)
                     }
                 });
                 matches
             }
             QueryOperator::GT => {
                 let mut matches: Vec<(String, Value)> = vec![];
-                float_tree_reader.iter_all_mut().for_each(|(k, v)| {
+                float_tree_reader.iter_all().for_each(|(k, v)| {
                     if k.0.gt(&q) {
-                        matches.append(v)
+                        matches.extend_from_slice(v)
                     }
                 });
                 matches
@@ -520,31 +508,80 @@ impl<'a> Index {
         }
     }
 
-    fn query_string_index(&self, q: String, op: QueryOperator) -> Vec<(String, Value)> {
+    fn query_string_index(&self,key : &str, q: String, op: QueryOperator) -> Vec<(String, Value)> {
+        let empty_map = MultiMap::new();
         let empty_matches: Vec<(String, Value)> = Vec::new();
-        let mut str_tree_reader = self.str_tree.write().unwrap();
+        let read_guard = self.str_tree.read().unwrap();
+        let mut str_tree_reader = read_guard.get(key).unwrap_or(&empty_map);
         match op {
             QueryOperator::EQ => {
                 str_tree_reader.get_vec(&q).unwrap_or(&empty_matches).to_vec()
             }
             QueryOperator::LT => {
                 let mut matches: Vec<(String, Value)> = vec![];
-                str_tree_reader.iter_all_mut().for_each(|(k, v)| {
+                str_tree_reader.iter_all().for_each(|(k, v)| {
                     if k.lt(&q) {
-                        matches.append(v)
+                        matches.extend_from_slice(v)
                     }
                 });
                 matches
             }
             QueryOperator::GT => {
                 let mut matches: Vec<(String, Value)> = vec![];
-                str_tree_reader.iter_all_mut().for_each(|(k, v)| {
+                str_tree_reader.iter_all().for_each(|(k, v)| {
                     if k.gt(&q) {
-                        matches.append(v)
+                        matches.extend_from_slice(v)
                     }
                 });
                 matches
             }
+        }
+    }
+
+    fn insert_int_index(&self,field: &str, iv : &Value, k : &str, v: &Value){
+        let mut int_tree_writer = self.int_tree.write().unwrap();
+        let key = iv.as_i64().unwrap();
+
+        match int_tree_writer.get_mut(field) {
+            None => {
+                let mut m = MultiMap::new();
+                m.insert(key, (k.to_string(), v.clone()));
+                int_tree_writer.insert(field.to_string(),m);
+            },
+            Some( m) => {
+                m.insert(key, (k.to_string(), v.clone()))
+            },
+        }
+    }
+
+    fn insert_float_index(&self,field: &str, iv : &Value, k : &str, v: &Value){
+        let mut float_tree_writer = self.float_tree.write().unwrap();
+        let key = iv.as_f64().unwrap();
+
+        match float_tree_writer.get_mut(field) {
+            None => {
+                let mut m = MultiMap::new();
+                m.insert(FloatKey(key), (k.to_string(), v.clone()));
+                float_tree_writer.insert(field.to_string(),m);
+            },
+            Some( m) => {
+                m.insert(FloatKey(key), (k.to_string(), v.clone()))
+            },
+        }
+    }
+    fn insert_string_index(&self,field: &str, iv : &Value, k : &str, v: &Value){
+        let mut str_tree_writer = self.str_tree.write().unwrap();
+        let key = String::from(iv.as_str().unwrap());
+
+        match str_tree_writer.get_mut(field) {
+            None => {
+                let mut m = MultiMap::new();
+                m.insert(key, (k.to_string(), v.clone()));
+                str_tree_writer.insert(field.to_string(),m);
+            },
+            Some( m) => {
+                m.insert(key, (k.to_string(), v.clone()))
+            },
         }
     }
 
@@ -703,37 +740,25 @@ impl<'a> Index {
                     j.path_orders.iter().for_each(|path_order| {
                         let value: Value = v.dot_get_or(&path_order.path, Value::Null).unwrap_or(Value::Null);
                         if value.is_i64() {
-                            let mut int_tree_writer = self.int_tree.write().unwrap();
-                            let key = value.as_i64().unwrap();
-                            int_tree_writer.insert(key, (k.to_string(), v.clone()))
+                            self.insert_int_index(&path_order.path, &value, k,v)
                         } else if value.is_f64() {
-                            let mut float_tree_writer = self.float_tree.write().unwrap();
-                            let key = value.as_f64().unwrap();
-                            float_tree_writer.insert(FloatKey(key), (k.to_string(), v.clone()))
+                            self.insert_float_index(&path_order.path, &value, k,v)
                         } else if value.is_string() {
-                            let mut str_tree_writer = self.str_tree.write().unwrap();
-                            let key = String::from(value.as_str().unwrap());
-                            str_tree_writer.insert(key, (k.to_string(), v.clone()))
+                            self.insert_string_index(&path_order.path, &value, k,v)
                         }
                     })
                 }
                 Indexer::Integer(i) => {
-                    let mut int_tree_writer = self.int_tree.write().unwrap();
                     let value: Value = v.clone();
-                    let key = value.as_i64().unwrap();
-                    int_tree_writer.insert(key, (k.to_string(), value))
+                    self.insert_int_index("*", &value, k,v)
                 }
                 Indexer::Float(f) => {
-                    let mut float_tree_writer = self.float_tree.write().unwrap();
                     let value: Value = v.clone();
-                    let key = value.as_f64().unwrap();
-                    float_tree_writer.insert(FloatKey(key), (k.to_string(), value))
+                    self.insert_float_index("*", &value, k,v)
                 }
                 Indexer::String(s) => {
-                    let mut str_tree_writer = self.str_tree.write().unwrap();
                     let value: Value = v.clone();
-                    let key = String::from(value.as_str().unwrap());
-                    str_tree_writer.insert(key, (k.to_string(), value))
+                    self.insert_string_index("*", &value, k,v)
                 }
             }
         });

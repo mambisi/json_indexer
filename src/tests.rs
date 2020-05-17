@@ -80,12 +80,9 @@ fn it_works() {
     });
 
     println!("{:?}", names_index.read());
-    match names_index.select_where("*", QueryOperator::EQ, Value::String("Kwadwo".to_string())){
-        Ok(res) => {
-            println!("Student with name kwadwo {:?}", res.read());
-        },
-        Err(_) => {},
-    };
+    let res = names_index.select_where("*", QueryOperator::EQ, Value::String("Kwadwo".to_string()));
+    println!("Student with name kwadwo {:?}", res.read());
+
 }
 
 
