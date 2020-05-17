@@ -114,7 +114,7 @@ extern crate serde;
 #[macro_use]
 extern crate serde_json;
 extern crate rayon;
-
+extern crate multimap;
 
 use ordered_float::OrderedFloat;
 use indexmap::map::IndexMap;
@@ -127,6 +127,8 @@ use std::collections::{HashSet, HashMap};
 use std::sync::{Mutex, RwLock, Arc};
 use std::borrow::Borrow;
 use std::ops::{DerefMut, Deref};
+use multimap::MultiMap;
+use std::hash::{Hash, Hasher};
 
 #[derive(Serialize, Deserialize, Clone)]
 pub enum Indexer {
@@ -134,6 +136,12 @@ pub enum Indexer {
     Integer(IndexInt),
     Float(IndexFloat),
     String(IndexString),
+}
+
+pub enum QueryOperator {
+    EQ,
+    LT,
+    GT,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -169,10 +177,38 @@ pub struct JsonPathOrder {
 }
 
 #[derive(Serialize, Deserialize, Clone)]
+pub enum JsonPathOrderValueType {
+    INT,
+    FLOAT,
+    STRING,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+struct FloatKey(f64);
+
+impl Hash for FloatKey {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        OrderedFloat(self.0).hash(state)
+    }
+}
+
+impl PartialEq for FloatKey {
+    fn eq(&self, other: &Self) -> bool {
+        OrderedFloat(self.0).eq(&OrderedFloat(other.0))
+    }
+}
+
+impl Eq for FloatKey {}
+
+#[derive(Serialize, Deserialize, Clone)]
 pub struct Index {
     pub indexer: Indexer,
+    int_tree: Arc<RwLock<MultiMap<i64, (String, Value)>>>,
+    str_tree: Arc<RwLock<MultiMap<String, (String, Value)>>>,
+    float_tree: Arc<RwLock<MultiMap<FloatKey, (String, Value)>>>,
     rs: IndexMap<String, Value>,
     ws: Arc<RwLock<IndexMap<String, Value>>>,
+
 }
 
 pub trait BatchTransaction {
@@ -294,14 +330,14 @@ impl<'a> BatchTransaction for Batch<'a> {
 }
 
 
-impl Index {
+impl<'a> Index {
     /// # Creates a new Index
     /// ## Example
     /// ```rust
     /// use indexer::{Indexer, IndexString, IndexOrd};
     /// let string_indexer = Indexer::String(IndexString {
     ///     ordering: IndexOrd::ASC
-    ///   });
+    /// });
     /// ```
     pub fn new(indexer: Indexer) -> Self {
         let mut collection: IndexMap<String, Value> = IndexMap::new();
@@ -309,6 +345,9 @@ impl Index {
             indexer,
             ws: Arc::new(RwLock::new(collection.clone())),
             rs: collection.clone(),
+            int_tree: Arc::new(RwLock::new(MultiMap::new())),
+            str_tree: Arc::new(RwLock::new(MultiMap::new())),
+            float_tree: Arc::new(RwLock::new(MultiMap::new())),
         };
         drop(collection);
         idx.build();
@@ -330,8 +369,190 @@ impl Index {
         }
     }
 
+    /// Removes an entry from the index
+    pub fn remove(&mut self, k: &String) {
+        let mut write_side = self.ws.write().unwrap();
+        write_side.remove(k);
+    }
 
-    fn filter<'a>(&mut self, k: &'a String, v: &'a Value) -> Result<(&'a String, &'a Value), ()> {
+    /// Batch transaction on the index. you can insert/update/delete multiple entries with one operation by commit the operation with ```b.commit()```
+    /// Example
+    /// ```rust
+    /// use indexer::{Index, BatchTransaction};
+    /// use serde_json::Value;
+    /// let mut names_index = Index::new(string_indexer);
+    /// names_index.batch(|b| {
+    ///     b.delete("user.4".to_owned());
+    ///     b.insert("user.1".to_owned(), Value::String("Kwadwo".to_string()));
+    ///     b.insert("user.2".to_owned(), Value::String("Kwame".to_string()));
+    ///     b.update("user.3".to_owned(), Value::String("Joseph".to_string()));
+    ///     b.commit()
+    /// });
+    /// ```
+    pub fn batch(&mut self, f: impl Fn(&mut Batch) + std::marker::Sync + std::marker::Send) {
+        let mut batch = Batch::new(self);
+        f(&mut batch);
+    }
+
+    pub fn iter(&self, f: impl Fn((&String, &Value)) + std::marker::Sync + std::marker::Send) {
+        self.rs.iter().for_each(f);
+    }
+
+    pub fn par_iter(&self, f: impl Fn((&String, &Value)) + std::marker::Sync + std::marker::Send) {
+        self.rs.par_iter().for_each(f);
+    }
+
+    pub fn select_where(&self, field: &str, op: QueryOperator, other: Value) -> Result<Index, String> {
+        let mut indexer = self.indexer.clone();
+        let matches = match &indexer {
+            Indexer::Json(j) => {
+                let mut field_dot_path = "";
+                j.path_orders.iter().map(|k| {
+                    if k.path == field {
+                        field_dot_path = field
+                    }
+                });
+                if field_dot_path.is_empty() {
+                    return Err(String::from("Field not indexed"));
+                }
+
+                if other.is_i64() {
+                    let q = other.as_i64().unwrap();
+                    self.query_int_index(q,op)
+                } else if other.is_f64() {
+                    let q = other.as_f64().unwrap();
+                    self.query_float_index(q,op)
+                } else if other.is_string() {
+                    let q = String::from(other.as_str().unwrap());
+                    self.query_string_index(q,op)
+                } else {
+                    vec![]
+                }
+            }
+            Indexer::Integer(i) => {
+                if field.is_empty() || !field.eq("*") {
+                    return Err(String::from("Field not indexed"));
+                }
+                let q = other.as_i64().unwrap();
+                self.query_int_index(q,op)
+            }
+            Indexer::Float(f) => {
+                if field.is_empty() || !field.eq("*") {
+                    return Err(String::from("Field not indexed"));
+                }
+                let q = other.as_f64().unwrap();
+                self.query_float_index(q,op)
+            }
+            Indexer::String(s) => {
+                if field.is_empty() || !field.eq("*") {
+                    return Err(String::from("Field not indexed"));
+                }
+                let q = String::from(other.as_str().unwrap());
+                self.query_string_index(q,op)
+            }
+        };
+
+        let mut new_index = Index::new(indexer);
+        new_index.batch(|b|{
+            matches.iter().for_each(|(k,v)|{
+                b.insert(k.to_owned(),v.clone())
+            });
+            b.commit()
+        });
+        Ok(new_index)
+
+    }
+
+    fn query_int_index(&self, q: i64, op: QueryOperator) -> Vec<(String, Value)> {
+        let empty_matches: Vec<(String, Value)> = Vec::new();
+        let mut int_tree_reader = self.int_tree.write().unwrap();
+
+        match op {
+            QueryOperator::EQ => {
+                int_tree_reader.get_vec(&q).unwrap_or(&empty_matches).to_vec()
+            }
+            QueryOperator::LT => {
+                let mut matches: Vec<(String, Value)> = vec![];
+                int_tree_reader.iter_all_mut().for_each(|(k, v)| {
+                    if k.lt(&q) {
+                        matches.append(v)
+                    }
+                });
+                matches
+            }
+            QueryOperator::GT => {
+                let mut matches = vec![];
+                int_tree_reader.iter_all_mut().for_each(|(k, v)| {
+                    if k.gt(&q) {
+                        matches.append(v)
+                    }
+                });
+                matches
+            }
+        }
+    }
+
+    fn query_float_index(&self, q: f64, op: QueryOperator) -> Vec<(String, Value)> {
+        let mut float_tree_reader = self.float_tree.write().unwrap();
+        let empty_matches: Vec<(String, Value)> = Vec::new();
+        match op {
+            QueryOperator::EQ => {
+                float_tree_reader.get_vec(&FloatKey(q)).unwrap_or(&empty_matches).to_vec()
+            }
+            QueryOperator::LT => {
+                let mut matches: Vec<(String, Value)> = vec![];
+                float_tree_reader.iter_all_mut().for_each(|(k, v)| {
+                    if k.0.lt(&q) {
+                        matches.append(v)
+                    }
+                });
+                matches
+            }
+            QueryOperator::GT => {
+                let mut matches: Vec<(String, Value)> = vec![];
+                float_tree_reader.iter_all_mut().for_each(|(k, v)| {
+                    if k.0.gt(&q) {
+                        matches.append(v)
+                    }
+                });
+                matches
+            }
+        }
+    }
+
+    fn query_string_index(&self, q: String, op: QueryOperator) -> Vec<(String, Value)> {
+        let empty_matches: Vec<(String, Value)> = Vec::new();
+        let mut str_tree_reader = self.str_tree.write().unwrap();
+        match op {
+            QueryOperator::EQ => {
+                str_tree_reader.get_vec(&q).unwrap_or(&empty_matches).to_vec()
+            }
+            QueryOperator::LT => {
+                let mut matches: Vec<(String, Value)> = vec![];
+                str_tree_reader.iter_all_mut().for_each(|(k, v)| {
+                    if k.lt(&q) {
+                        matches.append(v)
+                    }
+                });
+                matches
+            }
+            QueryOperator::GT => {
+                let mut matches: Vec<(String, Value)> = vec![];
+                str_tree_reader.iter_all_mut().for_each(|(k, v)| {
+                    if k.gt(&q) {
+                        matches.append(v)
+                    }
+                });
+                matches
+            }
+        }
+    }
+
+    pub fn read(&self) -> &IndexMap<String, Value> {
+        &self.rs
+    }
+
+    fn filter(&mut self, k: &'a String, v: &'a Value) -> Result<(&'a String, &'a Value), ()> {
         match &self.indexer {
             Indexer::Json(j) => {
                 let mut found = 0;
@@ -370,44 +591,6 @@ impl Index {
             }
         }
     }
-
-    /// Removes an entry from the index
-    pub fn remove(&mut self, k: &String) {
-        let mut write_side = self.ws.write().unwrap();
-        write_side.remove(k);
-    }
-
-    /// Batch transaction on the index. you can insert/update/delete multiple entries with one operation by commit the operation with ```b.commit()```
-    /// Example
-    /// ```rust
-    /// use indexer::{Index, BatchTransaction};
-    /// use serde_json::Value;
-    /// let mut names_index = Index::new(string_indexer);
-    ///     names_index.batch(|b| {
-    ///        b.delete("user.4".to_owned());
-    ///        b.insert("user.1".to_owned(), Value::String("Kwadwo".to_string()));
-    ///        b.insert("user.2".to_owned(), Value::String("Kwame".to_string()));
-    ///        b.update("user.3".to_owned(), Value::String("Joseph".to_string()));
-    ///        b.commit()
-    ///    });
-    /// ```
-    pub fn batch(&mut self, f: impl Fn(&mut Batch) + std::marker::Sync + std::marker::Send) {
-        let mut batch = Batch::new(self);
-        f(&mut batch);
-    }
-
-    pub fn iter(&self, f: impl Fn((&String, &Value)) + std::marker::Sync + std::marker::Send) {
-        self.rs.iter().for_each(f);
-    }
-
-    pub fn par_iter(&self, f: impl Fn((&String, &Value)) + std::marker::Sync + std::marker::Send) {
-        self.rs.par_iter().for_each(f);
-    }
-
-    pub fn read(&self) -> &IndexMap<String, Value> {
-        &self.rs
-    }
-
     fn build(&mut self) {
         let mut indexer = self.indexer.clone();
         match indexer {
@@ -500,7 +683,62 @@ impl Index {
                 });
             }
         }
-        self.rs.clone_from(self.ws.read().unwrap().deref())
+
+        let reader = self.ws.read().unwrap();
+
+        {
+            let mut int_tree_writer = self.int_tree.write().unwrap();
+            let mut float_tree_writer = self.float_tree.write().unwrap();
+            let mut str_tree_writer = self.str_tree.write().unwrap();
+            int_tree_writer.clear();
+            float_tree_writer.clear();
+            str_tree_writer.clear();
+        }
+
+
+        reader.par_iter().for_each(|(k, v)| {
+            let mut indexer = self.indexer.clone();
+            match indexer {
+                Indexer::Json(j) => {
+                    j.path_orders.iter().for_each(|path_order| {
+                        let value: Value = v.dot_get_or(&path_order.path, Value::Null).unwrap_or(Value::Null);
+                        if value.is_i64() {
+                            let mut int_tree_writer = self.int_tree.write().unwrap();
+                            let key = value.as_i64().unwrap();
+                            int_tree_writer.insert(key, (k.to_string(), v.clone()))
+                        } else if value.is_f64() {
+                            let mut float_tree_writer = self.float_tree.write().unwrap();
+                            let key = value.as_f64().unwrap();
+                            float_tree_writer.insert(FloatKey(key), (k.to_string(), v.clone()))
+                        } else if value.is_string() {
+                            let mut str_tree_writer = self.str_tree.write().unwrap();
+                            let key = String::from(value.as_str().unwrap());
+                            str_tree_writer.insert(key, (k.to_string(), v.clone()))
+                        }
+                    })
+                }
+                Indexer::Integer(i) => {
+                    let mut int_tree_writer = self.int_tree.write().unwrap();
+                    let value: Value = v.clone();
+                    let key = value.as_i64().unwrap();
+                    int_tree_writer.insert(key, (k.to_string(), value))
+                }
+                Indexer::Float(f) => {
+                    let mut float_tree_writer = self.float_tree.write().unwrap();
+                    let value: Value = v.clone();
+                    let key = value.as_f64().unwrap();
+                    float_tree_writer.insert(FloatKey(key), (k.to_string(), value))
+                }
+                Indexer::String(s) => {
+                    let mut str_tree_writer = self.str_tree.write().unwrap();
+                    let value: Value = v.clone();
+                    let key = String::from(value.as_str().unwrap());
+                    str_tree_writer.insert(key, (k.to_string(), value))
+                }
+            }
+        });
+
+        self.rs.clone_from(reader.deref())
     }
 }
 

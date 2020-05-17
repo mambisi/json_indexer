@@ -10,6 +10,7 @@ use serde_json::Number;
 struct Student {
     name: String,
     age: u8,
+    state: String,
     grade: f64,
 }
 
@@ -19,16 +20,19 @@ fn it_works() {
     students.insert("student:0".to_owned(), Student {
         name: "Mambisi".to_owned(),
         age: 21,
+        state : "CA".to_owned(),
         grade: 3.1,
     });
     students.insert("student:1".to_owned(), Student {
         name: "Joseph".to_owned(),
         age: 12,
+        state : "CA".to_owned(),
         grade: 3.1,
     });
     students.insert("student:2".to_owned(), Student {
         name: "Elka".to_owned(),
         age: 12,
+        state : "FL".to_owned(),
         grade: 4.0,
     });
 
@@ -66,6 +70,7 @@ fn it_works() {
     let mut names_index = Index::new(string_indexer);
     names_index.batch(|b| {
         b.insert("user.1".to_owned(), Value::String("Kwadwo".to_string()));
+        b.insert("user.8".to_owned(), Value::String("Kwadwo".to_string()));
         b.insert("user.2".to_owned(), Value::String("Kwame".to_string()));
         b.insert("user.3".to_owned(), Value::String("Joseph".to_string()));
         b.insert("user.4".to_owned(), Value::String("Jake".to_string()));
@@ -75,6 +80,12 @@ fn it_works() {
     });
 
     println!("{:?}", names_index.read());
+    match names_index.select_where("*", QueryOperator::EQ, Value::String("Kwadwo".to_string())){
+        Ok(res) => {
+            println!("Student with name kwadwo {:?}", res.read());
+        },
+        Err(_) => {},
+    };
 }
 
 
