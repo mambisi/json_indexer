@@ -53,7 +53,7 @@ Single index
     "user.5": String("Mambisi")
 }
 */
-    let res = names_index.find_all("*", "like", Value::String("k*".to_string()));
+    let res = names_index.find_where("*", "like", Value::String("k*".to_string()));
     println!("users whose name starts with K: {:?}", res.read());
 /* outputs
 users whose name starts with K: {"user.8": String("Kwadwo"), "user.1": String("Kwadwo"), "user.2": String("Kwame")}
@@ -136,7 +136,7 @@ Multi index with dot path
 }
 */
 
-    let query = students_index.find_all("state", "eq", Value::String("CA".to_string()));
+    let query = students_index.find_where("state", "eq", Value::String("CA".to_string()));
     println!("Find all students in CA: {:?}", query.read());
 /*output
 Find all students in CA: {
@@ -145,7 +145,7 @@ Find all students in CA: {
 }
 */
 
-    let query = students_index.find_all("gpa", "gt", Value::from(3.5));
+    let query = students_index.find_where("gpa", "gt", Value::from(3.5));
     println!("Find all students whose gpa greater than 3.5: {:?}", query.read());
 /*
 Find all students whose gpa greater than 3.5: {

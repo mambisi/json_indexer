@@ -42,7 +42,7 @@
 //!    "user.5": String("Mambisi")
 //! }
 //! */
-//! let res = names_index.find_all("*", "like", Value::String("k*".to_string()));
+//! let res = names_index.find_where("*", "like", Value::String("k*".to_string()));
 //! println!("users whose name starts with K: {:?}", res.read());
 //! /*outputs
 //! users whose name starts with K: {"user.8": String("Kwadwo"), "user.1": String("Kwadwo"), "user.2": String("Kwame")}
@@ -130,7 +130,7 @@
 //! }
 //! */
 //!     // Querying an index
-//!    let query = students_index.find_all("state", "eq", Value::String("CA".to_string()));
+//!    let query = students_index.find_where("state", "eq", Value::String("CA".to_string()));
 //!    println!("Find all students in CA: {:?}", query.read());
 //! /*
 //! Find all students in CA: {
@@ -139,7 +139,7 @@
 //! }
 //! */
 //!
-//!    let query = students_index.find_all("gpa", "gt", Value::from(3.5));
+//!    let query = students_index.find_where("gpa", "gt", Value::from(3.5));
 //!    println!("Find all students whose gpa greater than 3.5: {:?}", query.read());
 //!/*
 //! Find all students whose gpa greater than 3.5: {
@@ -386,6 +386,159 @@ impl<'a> BatchTransaction for Batch<'a> {
     }
 }
 
+pub struct QueryResult{
+    matches : Vec<(String, Value)>,
+    indexer : Indexer,
+    index : Index,
+}
+impl<'a> QueryResult {
+    pub fn new(matches : Vec<(String, Value)>, indexer : Indexer) -> Self {
+
+        QueryResult {
+            matches,
+            indexer: indexer.clone(),
+            index : Index::new(indexer)
+        }
+    }
+    pub fn and_then(&'a mut self) -> &'a Index {
+        //let mut new_index = Index::new(self.indexer.clone());
+        for (k,v) in self.matches.iter(){
+            self.index.insert(k.to_owned(), v.clone())
+        }
+        &self.index
+    }
+
+    pub fn count(&self) -> usize {
+        self.matches.len()
+    }
+
+    pub fn order_by(&mut self,indexer : Indexer) -> OrderedResult{
+        self.indexer = indexer.clone();
+        self.sort();
+        OrderedResult {
+            matches: &mut self.matches
+        }
+    }
+
+    fn sort(&mut self){
+        let mut indexer = self.indexer.clone();
+        match indexer {
+            Indexer::Json(j) => {
+                self.matches.par_sort_by(|(_,lhs),(_,rhs)| {
+                    let ordering: Vec<Ordering> = j.path_orders.iter().map(|path_order| {
+                        let lvalue = lhs.dot_get_or(&path_order.path, Value::Null).unwrap_or(Value::Null);
+
+                        let rvalue = rhs.dot_get_or(&path_order.path, Value::Null).unwrap_or(Value::Null);
+                        match (lvalue, rvalue) {
+                            (Value::String(ls), Value::String(rs)) => {
+                                match path_order.ordering {
+                                    IndexOrd::ASC => {
+                                        ls.cmp(&rs)
+                                    }
+                                    IndexOrd::DESC => {
+                                        rs.cmp(&ls)
+                                    }
+                                }
+                            }
+                            (Value::Number(ls), Value::Number(rs)) => {
+                                let ln = ls.as_f64().unwrap_or(0.0);
+                                let rn = rs.as_f64().unwrap_or(0.0);
+
+                                match path_order.ordering {
+                                    IndexOrd::ASC => {
+                                        OrderedFloat(ln).cmp(&OrderedFloat(rn))
+                                    }
+                                    IndexOrd::DESC => {
+                                        OrderedFloat(rn).cmp(&OrderedFloat(ln))
+                                    }
+                                }
+                            }
+                            _ => {
+                                Ordering::Equal
+                            }
+                        }
+                    }).collect();
+
+                    let mut itr = ordering.iter();
+                    let mut order_chain = itr.next().unwrap_or(&Ordering::Equal).to_owned();
+
+                    while let Some(t) = itr.next() {
+                        order_chain = order_chain.then(t.to_owned()).to_owned();
+                    }
+                    order_chain
+                });
+            }
+            Indexer::Integer(i) => {
+                self.matches.par_sort_by(|(_,lhs),(_,rhs)| {
+                    let lvalue = lhs.as_i64().unwrap_or(0);
+                    let rvalue = rhs.as_i64().unwrap_or(0);
+                    match i.ordering {
+                        IndexOrd::ASC => {
+                            lvalue.cmp(&rvalue)
+                        }
+                        IndexOrd::DESC => {
+                            rvalue.cmp(&lvalue)
+                        }
+                    }
+                });
+            }
+            Indexer::Float(f) => {
+                self.matches.par_sort_by(|(_,lhs),(_,rhs)| {
+                    let lvalue = lhs.as_f64().unwrap_or(0.0);
+                    let rvalue = rhs.as_f64().unwrap_or(0.0);
+
+                    match f.ordering {
+                        IndexOrd::ASC => {
+                            OrderedFloat(lvalue).cmp(&OrderedFloat(rvalue))
+                        }
+                        IndexOrd::DESC => {
+                            OrderedFloat(rvalue).cmp(&OrderedFloat(lvalue))
+                        }
+                    }
+                });
+            }
+            Indexer::String(s) => {
+                self.matches.par_sort_by(|(_,lhs),(_,rhs)| {
+                    let lvalue = lhs.as_str().unwrap_or("");
+                    let rvalue = rhs.as_str().unwrap_or("");
+                    match s.ordering {
+                        IndexOrd::ASC => {
+                            lvalue.cmp(&rvalue)
+                        }
+                        IndexOrd::DESC => {
+                            rvalue.cmp(&lvalue)
+                        }
+                    }
+                });
+            }
+        }
+    }
+
+}
+
+pub struct OrderedResult<'a > {
+    matches : &'a mut Vec<(String, Value)>,
+}
+
+impl<'a> OrderedResult<'a> {
+    pub fn iter(&'a self, f: impl FnMut(&'a (std::string::String, serde_json::Value),) -> ()) {
+        self.matches.iter().for_each(f);
+    }
+
+    pub fn count(&self) -> usize {
+        self.matches.len()
+    }
+
+    pub fn par_iter(&'a self,f: impl Fn(&'a (std::string::String, serde_json::Value),) -> () + std::marker::Sync + std::marker::Send) {
+        //self.rs.par_iter().for_each(f);
+        self.matches.par_iter().for_each(f);
+    }
+
+    pub fn limit(&'a mut self, size : usize) -> &mut Self {
+        self.matches.truncate(size);
+        self
+    }
+}
 
 impl<'a> Index {
     /// # Creates a new Index
@@ -406,7 +559,6 @@ impl<'a> Index {
             str_tree: Arc::new(RwLock::new(HashMap::new())),
             float_tree: Arc::new(RwLock::new(HashMap::new())),
         };
-        drop(collection);
         idx.build();
         idx
     }
@@ -416,13 +568,37 @@ impl<'a> Index {
         match self.filter(&k, &v) {
             Ok(e) => {
                 let mut collection = self.ws.write().unwrap();
-                let (key, value) = e;
-                collection.insert(key.to_string(), value.clone());
+                let (key, v) = e;
+                collection.insert(key.to_string(), v.clone());
+                let mut indexer = self.indexer.clone();
+                match indexer {
+                    Indexer::Json(j) => {
+                        j.path_orders.iter().for_each(|path_order| {
+                            let value: Value = v.dot_get_or(&path_order.path, Value::Null).unwrap_or(Value::Null);
+                            if value.is_i64() {
+                                self.insert_int_index(&path_order.path, &value, key, v)
+                            } else if value.is_f64() {
+                                self.insert_float_index(&path_order.path, &value, key, v)
+                            } else if value.is_string() {
+                                self.insert_string_index(&path_order.path, &value, key, v)
+                            }
+                        })
+                    }
+                    Indexer::Integer(i) => {
+                        let value: Value = v.clone();
+                        self.insert_int_index("*", &value, key, v)
+                    }
+                    Indexer::Float(f) => {
+                        let value: Value = v.clone();
+                        self.insert_float_index("*", &value, key, v)
+                    }
+                    Indexer::String(s) => {
+                        let value: Value = v.clone();
+                        self.insert_string_index("*", &value, key, v)
+                    }
+                }
             }
             Err(_) => {}
-        }
-        {
-            self.build();
         }
     }
 
@@ -451,12 +627,65 @@ impl<'a> Index {
         f(&mut batch);
     }
 
-    pub fn iter(&self, f: impl Fn((&String, &Value)) + std::marker::Sync + std::marker::Send) {
-        self.rs.iter().for_each(f);
+    pub fn iter(&mut self, f: impl Fn((&String, &Value)) + std::marker::Sync + std::marker::Send) {
+        self.sort();
+        let reader = self.ws.read().unwrap();
+        reader.iter().for_each(f);
     }
 
-    pub fn par_iter(&self, f: impl Fn((&String, &Value)) + std::marker::Sync + std::marker::Send) {
-        self.rs.par_iter().for_each(f);
+    pub fn par_iter(&mut self, f: impl Fn((&String, &Value)) + std::marker::Sync + std::marker::Send) {
+        //self.rs.par_iter().for_each(f);
+        self.sort();
+        let reader = self.ws.read().unwrap();
+        reader.par_iter().for_each(f);
+    }
+
+
+
+    ///Query on an index. by using conditional operators
+    /// - `eq` Equals
+    /// - `lt` Less than
+    /// - `gt` Greater than
+    /// - `like` Check for match using Glob style pattern matching
+    ///
+    /// ## Example
+    ///  ```rust
+    ///   let query = students_index.find_where("state", "eq", Value::String("CA".to_string()));
+    ///   println!("Find all students in CA: {:?}", query());
+    ///  ```
+    ///
+    pub fn find_where(&self, field: &str, cond: &str, value: Value) -> QueryResult {
+        let op = QueryOperator::from_str(cond);
+        let mut indexer = self.indexer.clone();
+        let matches = match &indexer {
+            Indexer::Json(j) => {
+                if value.is_i64() {
+                    let q = value.as_i64().unwrap();
+                    self.query_int_index(field, q, op)
+                } else if value.is_f64() {
+                    let q = value.as_f64().unwrap();
+                    self.query_float_index(field, q, op)
+                } else if value.is_string() {
+                    let q = String::from(value.as_str().unwrap());
+                    self.query_string_index(field, q, op)
+                } else {
+                    vec![]
+                }
+            }
+            Indexer::Integer(i) => {
+                let q = value.as_i64().unwrap();
+                self.query_int_index(field, q, op)
+            }
+            Indexer::Float(f) => {
+                let q = value.as_f64().unwrap();
+                self.query_float_index(field, q, op)
+            }
+            Indexer::String(s) => {
+                let q = String::from(value.as_str().unwrap());
+                self.query_string_index(field, q, op)
+            }
+        };
+        QueryResult::new(matches,indexer)
     }
 
     ///Query on an index. by using conditional operators
@@ -471,35 +700,36 @@ impl<'a> Index {
     ///   println!("Find all students in CA: {:?}", query.read());
     ///  ```
     ///
-    pub fn find_all(&self, by: &str, cond: &str, eval: Value) -> Index {
+    #[deprecated(since = "0.1.6", note = "Please use find_all function instead")]
+    pub fn find_all(&self, field: &str, cond: &str, value: Value) -> Index {
         let op = QueryOperator::from_str(cond);
         let mut indexer = self.indexer.clone();
         let matches = match &indexer {
             Indexer::Json(j) => {
-                if eval.is_i64() {
-                    let q = eval.as_i64().unwrap();
-                    self.query_int_index(by, q, op)
-                } else if eval.is_f64() {
-                    let q = eval.as_f64().unwrap();
-                    self.query_float_index(by, q, op)
-                } else if eval.is_string() {
-                    let q = String::from(eval.as_str().unwrap());
-                    self.query_string_index(by, q, op)
+                if value.is_i64() {
+                    let q = value.as_i64().unwrap();
+                    self.query_int_index(field, q, op)
+                } else if value.is_f64() {
+                    let q = value.as_f64().unwrap();
+                    self.query_float_index(field, q, op)
+                } else if value.is_string() {
+                    let q = String::from(value.as_str().unwrap());
+                    self.query_string_index(field, q, op)
                 } else {
                     vec![]
                 }
             }
             Indexer::Integer(i) => {
-                let q = eval.as_i64().unwrap();
-                self.query_int_index(by, q, op)
+                let q = value.as_i64().unwrap();
+                self.query_int_index(field, q, op)
             }
             Indexer::Float(f) => {
-                let q = eval.as_f64().unwrap();
-                self.query_float_index(by, q, op)
+                let q = value.as_f64().unwrap();
+                self.query_float_index(field, q, op)
             }
             Indexer::String(s) => {
-                let q = String::from(eval.as_str().unwrap());
-                self.query_string_index(by, q, op)
+                let q = String::from(value.as_str().unwrap());
+                self.query_string_index(field, q, op)
             }
         };
 
@@ -542,11 +772,10 @@ impl<'a> Index {
                 });
                 matches
             }
-            QueryOperator::LIKE => { vec![]}
+            QueryOperator::LIKE => { vec![] }
             QueryOperator::UNKNOWN => { vec![] }
         }
     }
-
     fn query_float_index(&self, key: &str, q: f64, op: QueryOperator) -> Vec<(String, Value)> {
         let empty_map = MultiMap::new();
         let read_guard = self.float_tree.read().unwrap();
@@ -574,12 +803,10 @@ impl<'a> Index {
                 });
                 matches
             }
-            QueryOperator::LIKE => {vec![]}
+            QueryOperator::LIKE => { vec![] }
             QueryOperator::UNKNOWN => { vec![] }
-
         }
     }
-
     fn query_string_index(&self, key: &str, q: String, op: QueryOperator) -> Vec<(String, Value)> {
         let empty_map = MultiMap::new();
         let empty_matches: Vec<(String, Value)> = Vec::new();
@@ -612,13 +839,13 @@ impl<'a> Index {
                 let options = glob::MatchOptions {
                     case_sensitive: false,
                     require_literal_separator: false,
-                    require_literal_leading_dot: false
+                    require_literal_leading_dot: false,
                 };
                 let glob_matcher = match glob::Pattern::new(&q) {
-                    Ok(m) => {m},
+                    Ok(m) => { m }
                     Err(_) => {
-                        return vec![]
-                    },
+                        return vec![];
+                    }
                 };
 
                 str_tree_reader.iter_all().for_each(|(k, v)| {
@@ -649,7 +876,6 @@ impl<'a> Index {
             }
         }
     }
-
     fn insert_float_index(&self, field: &str, iv: &Value, k: &str, v: &Value) {
         let mut float_tree_writer = self.float_tree.write().unwrap();
         let key = iv.as_f64().unwrap();
@@ -724,8 +950,17 @@ impl<'a> Index {
             }
         }
     }
-    fn build(&mut self) {
+
+    pub fn count(&self) -> usize {
+        let reader = self.ws.read().unwrap();
+        reader.len()
+    }
+
+    fn sort(&mut self) {
+        //let reader = self.ws.read().unwrap();
+        //self.rs.clone_from(reader.deref()
         let mut indexer = self.indexer.clone();
+
         match indexer {
             Indexer::Json(j) => {
                 self.ws.write().unwrap().par_sort_by(|_, lhs, _, rhs| {
@@ -816,6 +1051,10 @@ impl<'a> Index {
                 });
             }
         }
+    }
+    fn build(&mut self) {
+        //let reader = self.ws.read().unwrap();
+        //self.rs.clone_from(reader.deref()
 
         let reader = self.ws.read().unwrap();
 
@@ -858,14 +1097,17 @@ impl<'a> Index {
                 }
             }
         });
-
-        self.rs.clone_from(reader.deref())
     }
 }
 
 #[cfg(test)]
 #[macro_use]
 extern crate log;
+
+
+#[cfg(test)]
+#[macro_use]
+extern crate nanoid;
 
 #[cfg(test)]
 mod tests;

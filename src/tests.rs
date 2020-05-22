@@ -5,6 +5,7 @@ use std::sync::{Arc, RwLock};
 use std::{thread, env, time};
 use env_logger;
 use serde_json::Number;
+use std::time::{Duration, Instant};
 
 #[derive(Serialize, Deserialize)]
 struct Student {
@@ -20,33 +21,33 @@ fn it_works() {
     students.insert("student:0".to_owned(), Student {
         name: "Mambisi".to_owned(),
         age: 21,
-        state : "CA".to_owned(),
+        state: "CA".to_owned(),
         gpa: 3.1,
     });
     students.insert("student:1".to_owned(), Student {
         name: "Joseph".to_owned(),
         age: 12,
-        state : "CA".to_owned(),
+        state: "CA".to_owned(),
         gpa: 3.1,
     });
     students.insert("student:2".to_owned(), Student {
         name: "Elka".to_owned(),
         age: 12,
-        state : "FL".to_owned(),
+        state: "FL".to_owned(),
         gpa: 4.0,
     });
 
     students.insert("student:18".to_owned(), Student {
         name: "Alex".to_owned(),
         age: 15,
-        state : "NY".to_owned(),
+        state: "NY".to_owned(),
         gpa: 3.7,
     });
 
     students.insert("student:18".to_owned(), Student {
         name: "Jackson".to_owned(),
         age: 17,
-        state : "NY".to_owned(),
+        state: "NY".to_owned(),
         gpa: 3.8,
     });
 
@@ -106,91 +107,121 @@ fn it_works() {
     println!("{:?}", names_index.read());
     let res = names_index.find_all("*", "like", Value::String("k*".to_string()));
     println!("users whose name starts with K: {:?}", res.read());
-
 }
 
-
-
-/*
+use std::fs::File;
+use std::io::BufReader;
 
 #[test]
-fn test_shared_state() {
-    env::set_var("RUST_LOG", "debug");
-    env_logger::init();
+fn load_json_from_file() {
+    let file = File::open("/Users/mambisiz/movies.json").unwrap();
+    let reader = BufReader::new(file);
+    let json: Value = serde_json::from_reader(reader).unwrap();
+    let list = json.as_array().unwrap();
 
-    /*
-    let name_order = JsonPathOrder {
-        path: "name".to_string(),
+    let title_order = JsonPathOrder {
+        path: "title".to_string(),
         ordering: IndexOrd::ASC,
     };
+
+    let release_date_order = JsonPathOrder {
+        path: "release_date".to_string(),
+        ordering: IndexOrd::DESC,
+    };
+
     let indexer = Indexer::Json(IndexJson {
-        path_orders: vec![name_order]
+        path_orders: vec![release_date_order.clone(), title_order]
     });
-    */
-    let mut indices = HashMap::new();
-    indices.insert("name_index".to_string(), Index::new(Indexer::Integer(IndexInt { ordering: IndexOrd::ASC }), IndexMap::new()));
-    let index = Arc::new(RwLock::new(indices));
 
+    let mut index = Index::new(indexer);
+
+    index.batch(|b| {
+        let timer = Instant::now();
+        list.iter().for_each(|v| {
+            let key = v.dot_get_or("id", Value::String("".to_string())).unwrap();
+            b.insert(String::from(key.as_str().unwrap().to_string()), v.clone())
+        });
+        b.commit();
+        let total_time = timer.elapsed().as_secs_f64();
+        println!("Indexed list of size: {:?} in {} secs", list.len(), total_time);
+    });
+
+    drop(json);
+
+    let mut timer = Instant::now();
+
+    let order_indexer = Indexer::Json(IndexJson {
+        path_orders: vec![release_date_order.clone()]
+    });
+
+    let mut query = index.find_where("title", "like", Value::String(String::from("*Jumanji*")));
+    let found = query.count();
+
+    let completion_time = timer.elapsed().as_millis();
+    println!("query completed in {} ms, found {} items", completion_time, found);
+
+
+    println!("Showing Results: release date");
+    query.order_by(order_indexer).limit(10).iter(|(k, v)| {
+        println!("{}:{}", k, serde_json::to_string_pretty(v).unwrap());
+    })
+}
+
+#[test]
+fn load_json_from_with_incremental_inserts() {
+    let title_order = JsonPathOrder {
+        path: "title".to_string(),
+        ordering: IndexOrd::ASC,
+    };
+
+    let release_date_order = JsonPathOrder {
+        path: "release_date".to_string(),
+        ordering: IndexOrd::DESC,
+    };
+
+    let indexer = Indexer::Json(IndexJson {
+        path_orders: vec![release_date_order, title_order]
+    });
+
+    let index = Arc::new(RwLock::new(Index::new(indexer))).clone();
     let mut handles = vec![];
-
     {
         let index = Arc::clone(&index);
-        let writing = thread::spawn(move || {
-            let wait = time::Duration::from_millis(1);
-            let mut write_guard = index.write().unwrap();
-            let name_index = write_guard.get_mut("name_index").unwrap();
-            name_index.batch(|b| {
-
-                for i in 0..20000 {
-                    thread::sleep(wait);
-                    &b.insert(format!("student:{:?}", i), json!(i));
-                }
-
-                b.commit()
-            });
-
-
-        });
-        handles.push(writing);
-    }
-    {
-        let index = Arc::clone(&index);
-        let writing = thread::spawn(move || {
-            let wait = time::Duration::from_millis(1);
-            let mut write_guard = index.write().unwrap();
-            let name_index = write_guard.get_mut("name_index").unwrap();
-            name_index.batch(|b| {
-
-                for i in 21200..40000 {
-                    thread::sleep(wait);
-                    &b.insert(format!("student:{:?}", i), json!(i));
-                }
-
-                b.commit()
-            });
-
-
-        });
-        handles.push(writing);
-    }
-
-    {
-        let index = Arc::clone(&index);
-
         let reading = thread::spawn(move || {
-            let wait = time::Duration::from_secs(30);
-            thread::sleep(wait);
-            let read_guard = index.read().unwrap();
-            let name_index = read_guard.get("name_index").unwrap();
-            debug!("{:?}", name_index.read().len())
+            let wait = time::Duration::from_secs_f64(0.5);
+            loop {
+                thread::sleep(wait);
+                let read_guard = index.read().unwrap();
+                println!("Items count {:?}", read_guard.count())
+            }
         });
 
         handles.push(reading);
     }
 
+    {
+        let index = Arc::clone(&index);
+
+        let writing = thread::spawn(move || {
+            let file = File::open("/Users/mambisiz/movies.json").unwrap();
+            let reader = BufReader::new(file);
+            let json: Value = serde_json::from_reader(reader).unwrap();
+            let list = json.as_array().unwrap();
+
+            let timer = Instant::now();
+            list.iter().for_each(|v| {
+                let key = v.dot_get_or("id", Value::String("".to_string())).unwrap();
+                let mut idx = index.write().unwrap();
+                idx.insert(String::from(key.to_string()), v.clone())
+            });
+            let total_time = timer.elapsed().as_secs_f64();
+            println!("Indexed list of size: {:?} in {} secs", list.len(), total_time);
+            std::process::exit(1)
+        });
+        handles.push(writing);
+    }
+
     for handle in handles {
         handle.join().unwrap();
     }
-    // writing.join().unwrap();
 }
-*/
