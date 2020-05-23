@@ -80,8 +80,6 @@ fn it_works() {
         b.commit()
     });
 
-    println!("{:?}", students_index.read());
-
     let query = students_index.find_where("state", "eq", Value::String("CA".to_string()));
     println!("Find all students in CA: {:?}", query.read());
 

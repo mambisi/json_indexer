@@ -6,149 +6,6 @@
 //! this crate allows to create a sorted map of json objects based on the dot path, its similar to what a database like mongodb
 //! will generate and index based on the path given, this crate is meant to be used in create no sql database. this crate was
 //! created to be used as indexing structure for [escanordb](https://github.com/mambisi/escanor).
-//!
-//! ## Example
-//!
-//! Single index
-//!
-//! > This example demonstrates how you can use json indexer to index a json value
-//! ```rust
-//!     use indexer::{Indexer, IndexString, Index, IndexOrd, BatchTransaction};
-//!     use serde_json::Value;
-//!
-//!     let string_indexer = Indexer::String(IndexString {
-//!         ordering: IndexOrd::ASC
-//!     });
-//!
-//!     let mut names_index = Index::new(string_indexer);
-//!     names_index.batch(|b| {
-//!        b.insert("user.1".to_owned(), Value::String("Kwadwo".to_string()));
-//!        b.insert("user.2".to_owned(), Value::String("Kwame".to_string()));
-//!        b.insert("user.3".to_owned(), Value::String("Joseph".to_string()));
-//!        b.insert("user.4".to_owned(), Value::String("Jake".to_string()));
-//!        b.insert("user.5".to_owned(), Value::String("Mambisi".to_string()));
-//!        b.insert("user.6".to_owned(), Value::String("Ama".to_string()));
-//!        b.commit()
-//!     });
-//!
-//! println!("{:?}", names_index.read());
-//! /*outputs
-//! {
-//!  "user.6": String("Ama"),
-//!    "user.4": String("Jake"),
-//!     "user.3": String("Joseph"),
-//!    "user.1": String("Kwadwo"),
-//!    "user.2": String("Kwame"),
-//!    "user.5": String("Mambisi")
-//! }
-//! */
-//! let res = names_index.find_where("*", "like", Value::String("k*".to_string()));
-//! println!("users whose name starts with K: {:?}", res.read());
-//! /*outputs
-//! users whose name starts with K: {"user.8": String("Kwadwo"), "user.1": String("Kwadwo"), "user.2": String("Kwame")}
-//! */
-//!
-//! ```
-//!
-//!
-//! Multi index with dot path
-//! > This example demonstrates how you can use json indexer to index a full json object using multiple dot paths
-//! ```rust
-//!     use std::collections::HashMap;
-//! use indexer::{JsonPathOrder, IndexOrd, Indexer, IndexJson, Index, BatchTransaction};
-//! use serde_json::Value;
-//!     let mut students: HashMap<String, Student> = HashMap::new();
-//!     students.insert("student:0".to_owned(), Student {
-//!         name: "Mambisi".to_owned(),
-//!         age: 21,
-//!         state : "CA".to_owned(),
-//!         gpa: 3.1,
-//!     });
-//!     students.insert("student:1".to_owned(), Student {
-//!         name: "Joseph".to_owned(),
-//!         age: 12,
-//!         state : "CA".to_owned(),
-//!         gpa: 3.1,
-//!     });
-//!     students.insert("student:2".to_owned(), Student {
-//!         name: "Elka".to_owned(),
-//!         age: 12,
-//!         state : "FL".to_owned(),
-//!         gpa: 4.0,
-//!     });
-//!
-//!     students.insert("student:18".to_owned(), Student {
-//!         name: "Alex".to_owned(),
-//!         age: 15,
-//!         state : "NY".to_owned(),
-//!         gpa: 3.7,
-//!     });
-//!
-//!     students.insert("student:18".to_owned(), Student {
-//!         name: "Jackson".to_owned(),
-//!         age: 17,
-//!         state : "NY".to_owned(),
-//!         gpa: 3.8,
-//!     });
-//!
-//!     let gpa_order = JsonPathOrder {
-//!         path: "gpa".to_string(),
-//!         ordering: IndexOrd::DESC,
-//!     };
-//!
-//!     let name_order = JsonPathOrder {
-//!         path: "name".to_string(),
-//!         ordering: IndexOrd::ASC,
-//!     };
-//!
-//!     let state_order = JsonPathOrder {
-//!         path: "state".to_string(),
-//!         ordering: IndexOrd::ASC,
-//!     };
-//!
-//!     let indexer = Indexer::Json(IndexJson {
-//!         path_orders: vec![name_order, gpa_order, state_order]
-//!     });
-//!
-//!     let mut students_index = Index::new(indexer);
-//!
-//!     students_index.batch(|b| {
-//!         &students.iter().for_each(|(k, v)| {
-//!             let json = serde_json::to_value(v).unwrap_or(Value::Null);
-//!             b.insert(k.to_owned(), json);
-//!        });
-//!         b.commit()
-//!    });
-//!
-//!     println!("{:?}", index.read());
-//! /* Outputs
-//! {
-//! "student:2": Object({"age": Number(12), "gpa": Number(4.0), "name": String("Elka"), "state": String("FL")}),
-//! "student:18": Object({"age": Number(17), "gpa": Number(3.8), "name": String("Jackson"), "state": String("NY")}),
-//! "student:1": Object({"age": Number(12), "gpa": Number(3.1), "name": String("Joseph"), "state": String("CA")}),
-//! "student:0": Object({"age": Number(21), "gpa": Number(3.1), "name": String("Mambisi"), "state": String("CA")})
-//! }
-//! */
-//!     // Querying an index
-//!    let query = students_index.find_where("state", "eq", Value::String("CA".to_string()));
-//!    println!("Find all students in CA: {:?}", query.read());
-//! /*
-//! Find all students in CA: {
-//! "student:1": Object({"age": Number(12), "gpa": Number(3.1), "name": String("Joseph"), "state": String("CA")}),
-//! "student:0": Object({"age": Number(21), "gpa": Number(3.1), "name": String("Mambisi"), "state": String("CA")})
-//! }
-//! */
-//!
-//!    let query = students_index.find_where("gpa", "gt", Value::from(3.5));
-//!    println!("Find all students whose gpa greater than 3.5: {:?}", query.read());
-//!/*
-//! Find all students whose gpa greater than 3.5: {
-//! "student:2": Object({"age": Number(12), "gpa": Number(4.0), "name": String("Elka"), "state": String("FL")}),
-//! "student:18": Object({"age": Number(17), "gpa": Number(3.8), "name": String("Jackson"), "state": String("NY")})
-//! }
-//! */
-//!```
-
 
 
 
@@ -263,7 +120,6 @@ pub struct Index {
     int_tree: Arc<RwLock<HashMap<String, MultiMap<i64, (String, Value)>>>>,
     str_tree: Arc<RwLock<HashMap<String, MultiMap<String, (String, Value)>>>>,
     float_tree: Arc<RwLock<HashMap<String, MultiMap<FloatKey, (String, Value)>>>>,
-    rs: IndexMap<String, Value>,
     ws: Arc<RwLock<IndexMap<String, Value>>>,
 
 }
@@ -558,7 +414,6 @@ impl<'a> Index {
         let mut idx = Index {
             indexer,
             ws: Arc::new(RwLock::new(collection.clone())),
-            rs: collection.clone(),
             int_tree: Arc::new(RwLock::new(HashMap::new())),
             str_tree: Arc::new(RwLock::new(HashMap::new())),
             float_tree: Arc::new(RwLock::new(HashMap::new())),
@@ -694,63 +549,6 @@ impl<'a> Index {
             }
         };
         QueryResult::new(matches, indexer)
-    }
-
-    ///Query on an index. by using conditional operators
-    /// - `eq` Equals
-    /// - `lt` Less than
-    /// - `gt` Greater than
-    /// - `like` Check for match using Glob style pattern matching
-    ///
-    /// ## Example
-    ///  ```rust
-    ///   let query = students_index.find_all("state", "eq", Value::String("CA".to_string()));
-    ///   println!("Find all students in CA: {:?}", query.read());
-    ///  ```
-    ///
-    #[deprecated(since = "0.1.6", note = "Please use find_all function instead")]
-    pub fn find_all(&self, field: &str, cond: &str, value: Value) -> Index {
-        let op = QueryOperator::from_str(cond);
-        let mut indexer = self.indexer.clone();
-        let matches = match &indexer {
-            Indexer::Json(j) => {
-                if value.is_i64() {
-                    let q = value.as_i64().unwrap();
-                    self.query_int_index(field, q, op)
-                } else if value.is_f64() {
-                    let q = value.as_f64().unwrap();
-                    self.query_float_index(field, q, op)
-                } else if value.is_string() {
-                    let q = String::from(value.as_str().unwrap());
-                    self.query_string_index(field, q, op)
-                } else {
-                    vec![]
-                }
-            }
-            Indexer::Integer(i) => {
-                let q = value.as_i64().unwrap();
-                self.query_int_index(field, q, op)
-            }
-            Indexer::Float(f) => {
-                let q = value.as_f64().unwrap();
-                self.query_float_index(field, q, op)
-            }
-            Indexer::String(s) => {
-                let q = String::from(value.as_str().unwrap());
-                self.query_string_index(field, q, op)
-            }
-        };
-
-        let mut new_index = Index::new(indexer);
-
-        new_index.batch(|b| {
-            matches.iter().for_each(|(k, v)| {
-                b.insert(k.to_owned(), v.clone())
-            });
-            b.commit()
-        });
-
-        new_index
     }
 
     fn query_int_index(&self, key: &str, q: i64, op: QueryOperator) -> Vec<(String, Value)> {
@@ -914,11 +712,6 @@ impl<'a> Index {
             }
         }
     }
-
-    pub fn read(&self) -> &IndexMap<String, Value> {
-        &self.rs
-    }
-
     fn filter(&mut self, k: &'a String, v: &'a Value) -> Result<(&'a String, &'a Value), ()> {
         match &self.indexer {
             Indexer::Json(j) => {
