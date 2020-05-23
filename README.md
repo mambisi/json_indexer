@@ -7,13 +7,19 @@ this crate allows to create a sorted map of json objects based on the dot path, 
 will generate and index based on the path given, this crate is meant to be used in creating no sql databases. This library was 
 created to be used as indexing structure for [escanordb](https://github.com/mambisi/escanor).
 
+## Road to 0.3 : TODO 
+- Array Query Operators
+    - [ ] Contains: `all`
+    - [ ] Contains Any: `any`
+    - [ ] In: `in`
+
 ## Road to 0.2 :  TODO
-- [ ] Basic Query support
+- [X] Basic Query support
     - [X] Operators  `eq`  `lt` `gt` 
-    - [ ] limit query output
+    - [X] limit query output
     - [X] like (MS SQL LIKE `*ja*`)
 - [X] Compound queries
-- [ ] Order by
+- [X] Order by
 
 ## Version 0.1.5
 Features
