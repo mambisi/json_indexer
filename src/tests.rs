@@ -82,10 +82,10 @@ fn it_works() {
 
     println!("{:?}", students_index.read());
 
-    let query = students_index.find_all("state", "eq", Value::String("CA".to_string()));
+    let query = students_index.find_where("state", "eq", Value::String("CA".to_string()));
     println!("Find all students in CA: {:?}", query.read());
 
-    let query = students_index.find_all("gpa", "gt", Value::from(3.5));
+    let query = students_index.find_where("gpa", "gt", Value::from(3.5));
     println!("Find all students whose gpa greater than 3.5: {:?}", query.read());
 
     let string_indexer = Indexer::String(IndexString {
@@ -104,9 +104,10 @@ fn it_works() {
         b.commit()
     });
 
-    println!("{:?}", names_index.read());
-    let res = names_index.find_all("*", "like", Value::String("k*".to_string()));
-    println!("users whose name starts with K: {:?}", res.read());
+    let mut res = names_index.find_where("*", "like", Value::String("k*".to_string()));
+    println!("users whose name starts with K");
+    println!("{:?}", res.read());
+
 }
 
 use std::fs::File;
@@ -114,7 +115,8 @@ use std::io::BufReader;
 
 #[test]
 fn load_json_from_file() {
-    let file = File::open("/Users/mambisiz/movies.json").unwrap();
+    let movie_json_file = env::var("MOVIES_JSON_FILE").unwrap();
+    let file = File::open(movie_json_file).unwrap();
     let reader = BufReader::new(file);
     let json: Value = serde_json::from_reader(reader).unwrap();
     let list = json.as_array().unwrap();
@@ -130,7 +132,7 @@ fn load_json_from_file() {
     };
 
     let indexer = Indexer::Json(IndexJson {
-        path_orders: vec![release_date_order.clone(), title_order]
+        path_orders: vec![release_date_order.clone(), title_order.clone()]
     });
 
     let mut index = Index::new(indexer);
@@ -151,10 +153,10 @@ fn load_json_from_file() {
     let mut timer = Instant::now();
 
     let order_indexer = Indexer::Json(IndexJson {
-        path_orders: vec![release_date_order.clone()]
+        path_orders: vec![title_order.clone()]
     });
 
-    let mut query = index.find_where("title", "like", Value::String(String::from("*Jumanji*")));
+    let mut query = index.find_where("title", "like", Value::String("J*".to_string()));
     let found = query.count();
 
     let completion_time = timer.elapsed().as_millis();
@@ -203,7 +205,8 @@ fn load_json_from_with_incremental_inserts() {
         let index = Arc::clone(&index);
 
         let writing = thread::spawn(move || {
-            let file = File::open("/Users/mambisiz/movies.json").unwrap();
+            let movie_json_file = env::var("MOVIES_JSON_FILE").unwrap();
+            let file = File::open(movie_json_file).unwrap();
             let reader = BufReader::new(file);
             let json: Value = serde_json::from_reader(reader).unwrap();
             let list = json.as_array().unwrap();

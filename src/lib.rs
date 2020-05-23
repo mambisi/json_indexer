@@ -386,23 +386,23 @@ impl<'a> BatchTransaction for Batch<'a> {
     }
 }
 
-pub struct QueryResult{
-    matches : Vec<(String, Value)>,
-    indexer : Indexer,
-    index : Index,
+pub struct QueryResult {
+    matches: Vec<(String, Value)>,
+    indexer: Indexer,
+    index: Index,
 }
-impl<'a> QueryResult {
-    pub fn new(matches : Vec<(String, Value)>, indexer : Indexer) -> Self {
 
+impl<'a> QueryResult {
+    pub fn new(matches: Vec<(String, Value)>, indexer: Indexer) -> Self {
         QueryResult {
             matches,
             indexer: indexer.clone(),
-            index : Index::new(indexer)
+            index: Index::new(indexer),
         }
     }
     pub fn and_then(&'a mut self) -> &'a Index {
         //let mut new_index = Index::new(self.indexer.clone());
-        for (k,v) in self.matches.iter(){
+        for (k, v) in self.matches.iter() {
             self.index.insert(k.to_owned(), v.clone())
         }
         &self.index
@@ -412,7 +412,7 @@ impl<'a> QueryResult {
         self.matches.len()
     }
 
-    pub fn order_by(&mut self,indexer : Indexer) -> OrderedResult{
+    pub fn order_by(&mut self, indexer: Indexer) -> OrderedResult {
         self.indexer = indexer.clone();
         self.sort();
         OrderedResult {
@@ -420,11 +420,16 @@ impl<'a> QueryResult {
         }
     }
 
-    fn sort(&mut self){
+    pub fn read(&self) -> &Vec<(String, Value)> {
+        return &self.matches;
+    }
+
+
+    fn sort(&mut self) {
         let mut indexer = self.indexer.clone();
         match indexer {
             Indexer::Json(j) => {
-                self.matches.par_sort_by(|(_,lhs),(_,rhs)| {
+                self.matches.par_sort_by(|(_, lhs), (_, rhs)| {
                     let ordering: Vec<Ordering> = j.path_orders.iter().map(|path_order| {
                         let lvalue = lhs.dot_get_or(&path_order.path, Value::Null).unwrap_or(Value::Null);
 
@@ -469,7 +474,7 @@ impl<'a> QueryResult {
                 });
             }
             Indexer::Integer(i) => {
-                self.matches.par_sort_by(|(_,lhs),(_,rhs)| {
+                self.matches.par_sort_by(|(_, lhs), (_, rhs)| {
                     let lvalue = lhs.as_i64().unwrap_or(0);
                     let rvalue = rhs.as_i64().unwrap_or(0);
                     match i.ordering {
@@ -483,7 +488,7 @@ impl<'a> QueryResult {
                 });
             }
             Indexer::Float(f) => {
-                self.matches.par_sort_by(|(_,lhs),(_,rhs)| {
+                self.matches.par_sort_by(|(_, lhs), (_, rhs)| {
                     let lvalue = lhs.as_f64().unwrap_or(0.0);
                     let rvalue = rhs.as_f64().unwrap_or(0.0);
 
@@ -498,7 +503,7 @@ impl<'a> QueryResult {
                 });
             }
             Indexer::String(s) => {
-                self.matches.par_sort_by(|(_,lhs),(_,rhs)| {
+                self.matches.par_sort_by(|(_, lhs), (_, rhs)| {
                     let lvalue = lhs.as_str().unwrap_or("");
                     let rvalue = rhs.as_str().unwrap_or("");
                     match s.ordering {
@@ -513,15 +518,14 @@ impl<'a> QueryResult {
             }
         }
     }
-
 }
 
-pub struct OrderedResult<'a > {
-    matches : &'a mut Vec<(String, Value)>,
+pub struct OrderedResult<'a> {
+    matches: &'a mut Vec<(String, Value)>,
 }
 
 impl<'a> OrderedResult<'a> {
-    pub fn iter(&'a self, f: impl FnMut(&'a (std::string::String, serde_json::Value),) -> ()) {
+    pub fn iter(&'a self, f: impl FnMut(&'a (std::string::String, serde_json::Value)) -> ()) {
         self.matches.iter().for_each(f);
     }
 
@@ -529,12 +533,12 @@ impl<'a> OrderedResult<'a> {
         self.matches.len()
     }
 
-    pub fn par_iter(&'a self,f: impl Fn(&'a (std::string::String, serde_json::Value),) -> () + std::marker::Sync + std::marker::Send) {
+    pub fn par_iter(&'a self, f: impl Fn(&'a (std::string::String, serde_json::Value)) -> () + std::marker::Sync + std::marker::Send) {
         //self.rs.par_iter().for_each(f);
         self.matches.par_iter().for_each(f);
     }
 
-    pub fn limit(&'a mut self, size : usize) -> &mut Self {
+    pub fn limit(&'a mut self, size: usize) -> &mut Self {
         self.matches.truncate(size);
         self
     }
@@ -582,11 +586,12 @@ impl<'a> Index {
                             } else if value.is_string() {
                                 self.insert_string_index(&path_order.path, &value, key, v)
                             }
-                        })
+                        });
+
                     }
                     Indexer::Integer(i) => {
                         let value: Value = v.clone();
-                        self.insert_int_index("*", &value, key, v)
+                        self.insert_int_index("*", &value, key, v);
                     }
                     Indexer::Float(f) => {
                         let value: Value = v.clone();
@@ -597,9 +602,12 @@ impl<'a> Index {
                         self.insert_string_index("*", &value, key, v)
                     }
                 }
+
+
             }
             Err(_) => {}
         }
+
     }
 
     /// Removes an entry from the index
@@ -627,19 +635,19 @@ impl<'a> Index {
         f(&mut batch);
     }
 
-    pub fn iter(&mut self, f: impl Fn((&String, &Value)) + std::marker::Sync + std::marker::Send) {
-        self.sort();
-        let reader = self.ws.read().unwrap();
+    pub fn iter(&self, f: impl Fn((&String, &Value)) + std::marker::Sync + std::marker::Send) {
+        let mut new_index = self.clone();
+        new_index.sort();
+        let reader =  new_index.ws.read().unwrap();
         reader.iter().for_each(f);
     }
 
-    pub fn par_iter(&mut self, f: impl Fn((&String, &Value)) + std::marker::Sync + std::marker::Send) {
-        //self.rs.par_iter().for_each(f);
-        self.sort();
-        let reader = self.ws.read().unwrap();
+    pub fn par_iter(&self, f: impl Fn((&String, &Value)) + std::marker::Sync + std::marker::Send) {
+        let mut new_index = self.clone();
+        new_index.sort();
+        let reader =  new_index.ws.read().unwrap();
         reader.par_iter().for_each(f);
     }
-
 
 
     ///Query on an index. by using conditional operators
@@ -685,7 +693,7 @@ impl<'a> Index {
                 self.query_string_index(field, q, op)
             }
         };
-        QueryResult::new(matches,indexer)
+        QueryResult::new(matches, indexer)
     }
 
     ///Query on an index. by using conditional operators
