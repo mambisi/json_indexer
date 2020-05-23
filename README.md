@@ -135,6 +135,8 @@ users whose name starts with K
 
 Multi index with dot path
 > This example demonstrates how you can use json indexer to index a full json object using multiple dot paths
+>
+>Download sample data file [MOVIES_JSON_FILE](https://raw.githubusercontent.com/mambisi/json_indexer/master/sample/movies.json)
 ```rust
     let movie_json_file = env::var("MOVIES_JSON_FILE").unwrap();
     let file = File::open(movie_json_file).unwrap();
