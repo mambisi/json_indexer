@@ -1,6 +1,6 @@
 [package]
 name = "indexer"
-version = "0.2.1"
+version = "0.2.2"
 authors = ["Mambisi Zempare <lilbizi96@gmail.com>"]
 edition = "2018"
 repository = "https://github.com/mambisi/json_indexer"
@@ -8,6 +8,9 @@ license = "MIT OR Apache-2.0"
 documentation = "https://docs.rs/indexer"
 readme = "README.md"
 description = "This crate allows you to create an index (a multi-value sorted map) based on serde json values."
+exclude = [
+"sample/*"
+]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
