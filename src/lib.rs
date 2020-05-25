@@ -442,7 +442,6 @@ impl<'a> Index {
                                 self.insert_string_index(&path_order.path, &value, key, v)
                             }
                         });
-
                     }
                     Indexer::Integer(i) => {
                         let value: Value = v.clone();
@@ -457,18 +456,17 @@ impl<'a> Index {
                         self.insert_string_index("*", &value, key, v)
                     }
                 }
-
-
             }
             Err(_) => {}
         }
-
     }
 
     /// Removes an entry from the index
-    pub fn remove(&mut self, k: &String) {
+    pub fn remove(&mut self, k: &str) {
         let mut write_side = self.ws.write().unwrap();
         write_side.remove(k);
+        drop(write_side);
+        self.build()
     }
 
     /// Batch transaction on the index. you can insert/update/delete multiple entries with one operation by commit the operation with ```b.commit()```
@@ -493,14 +491,14 @@ impl<'a> Index {
     pub fn iter(&self, f: impl Fn((&String, &Value)) + std::marker::Sync + std::marker::Send) {
         let mut new_index = self.clone();
         new_index.sort();
-        let reader =  new_index.ws.read().unwrap();
+        let reader = new_index.ws.read().unwrap();
         reader.iter().for_each(f);
     }
 
     pub fn par_iter(&self, f: impl Fn((&String, &Value)) + std::marker::Sync + std::marker::Send) {
         let mut new_index = self.clone();
         new_index.sort();
-        let reader =  new_index.ws.read().unwrap();
+        let reader = new_index.ws.read().unwrap();
         reader.par_iter().for_each(f);
     }
 
@@ -712,6 +710,8 @@ impl<'a> Index {
             }
         }
     }
+
+
     fn filter(&mut self, k: &'a String, v: &'a Value) -> Result<(&'a String, &'a Value), ()> {
         match &self.indexer {
             Indexer::Json(j) => {
