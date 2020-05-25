@@ -745,28 +745,34 @@ impl<'a> Index {
     fn remove_int_index(&self, field: &str, iv: &Value, k: &str) {
         let mut int_tree_writer = self.int_tree.write().unwrap();
         let key = iv.as_i64().unwrap();
-        let mut empty_vec  = vec![];
+        let mut empty_vec = vec![];
         match int_tree_writer.get_mut(field) {
             None => {}
             Some(m) => {
                 let items = m.get_vec_mut(&key).unwrap_or(&mut empty_vec);
                 items.retain(|(key, _)| {
                     k.ne(key)
-                })
+                });
+                if items.is_empty() {
+                    m.remove(&key);
+                }
             }
         }
     }
     fn remove_float_index(&self, field: &str, iv: &Value, k: &str) {
         let mut float_tree_writer = self.float_tree.write().unwrap();
         let key = iv.as_f64().unwrap();
-        let mut empty_vec  = vec![];
+        let mut empty_vec = vec![];
         match float_tree_writer.get_mut(field) {
             None => {}
             Some(m) => {
                 let items = m.get_vec_mut(&FloatKey(key)).unwrap_or(&mut empty_vec);
                 items.retain(|(key, _)| {
                     k.ne(key)
-                })
+                });
+                if items.is_empty() {
+                    m.remove(&FloatKey(key));
+                }
             }
         }
     }
@@ -774,14 +780,17 @@ impl<'a> Index {
         let mut str_tree_writer = self.str_tree.write().unwrap();
         let key = iv.as_str().unwrap();
 
-        let mut empty_vec  = vec![];
+        let mut empty_vec = vec![];
         match str_tree_writer.get_mut(field) {
             None => {}
             Some(m) => {
                 let items = m.get_vec_mut(key).unwrap_or(&mut empty_vec);
                 items.retain(|(key, _)| {
                     k.ne(key)
-                })
+                });
+                if items.is_empty() {
+                    m.remove(key);
+                }
             }
         }
     }

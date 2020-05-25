@@ -101,7 +101,6 @@ fn it_works() {
     });
 
     names_index.remove("user.1");
-
     let res = names_index.find_where("*", "like", Value::String("k*".to_string()));
     println!("users whose name starts with K");
     println!("{:?}", res.read());
