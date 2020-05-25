@@ -11,9 +11,7 @@
 
 extern crate ordered_float;
 extern crate indexmap;
-#[macro_use]
 extern crate serde;
-#[macro_use]
 extern crate serde_json;
 extern crate rayon;
 extern crate multimap;
@@ -27,13 +25,9 @@ use std::cmp::Ordering;
 use rayon::prelude::*;
 use serde::{Serialize, Deserialize};
 use std::collections::{HashSet, HashMap};
-use std::sync::{Mutex, RwLock, Arc};
-use std::borrow::Borrow;
-use std::ops::{DerefMut, Deref};
+use std::sync::{RwLock, Arc};
 use multimap::MultiMap;
 use std::hash::{Hash, Hasher};
-use std::collections::hash_map::RandomState;
-use glob::{Pattern, PatternError};
 
 #[derive(Serialize, Deserialize, Clone)]
 pub enum Indexer {
@@ -64,23 +58,23 @@ impl QueryOperator {
     }
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone,Copy)]
 pub enum IndexOrd {
     ASC,
     DESC,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone,Copy)]
 pub struct IndexInt {
     pub ordering: IndexOrd
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Copy)]
 pub struct IndexString {
     pub ordering: IndexOrd
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Copy)]
 pub struct IndexFloat {
     pub ordering: IndexOrd
 }
@@ -97,7 +91,7 @@ pub struct JsonPathOrder {
 }
 
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Copy)]
 struct FloatKey(f64);
 
 impl Hash for FloatKey {
@@ -192,21 +186,25 @@ impl<'a> Batch<'a> {
 
 impl<'a> BatchTransaction for Batch<'a> {
     fn insert(&mut self, k: String, v: Value) {
-        match self.filter(&k, &v) {
+        let (k,v) = match self.filter(&k, &v) {
             Ok((k, v)) => {
-                self.inserts.insert(k.to_owned(), v.clone());
+                (k.to_owned(), v.clone())
             }
-            Err(_) => {}
+            Err(_) => {return;}
         };
+        self.inserts.insert(k,v);
     }
 
     fn update(&mut self, k: String, v: Value) {
-        match self.filter(&k, &v) {
+        let (k,v)= match self.filter(&k, &v) {
             Ok((k, v)) => {
-                self.updates.insert(k.to_owned(), v.clone());
+                (k.to_owned(), v.clone())
             }
-            Err(_) => {}
+            Err(_) => {
+                return;
+            }
         };
+        self.updates.insert(k, v);
     }
 
     fn delete(&mut self, k: String) {
@@ -282,7 +280,7 @@ impl<'a> QueryResult {
 
 
     fn sort(&mut self) {
-        let mut indexer = self.indexer.clone();
+        let indexer = self.indexer.clone();
         match indexer {
             Indexer::Json(j) => {
                 self.matches.par_sort_by(|(_, lhs), (_, rhs)| {
@@ -410,7 +408,7 @@ impl<'a> Index {
     /// });
     /// ```
     pub fn new(indexer: Indexer) -> Self {
-        let mut collection: IndexMap<String, Value> = IndexMap::new();
+        let collection: IndexMap<String, Value> = IndexMap::new();
         let mut idx = Index {
             indexer,
             ws: Arc::new(RwLock::new(collection.clone())),
@@ -429,7 +427,7 @@ impl<'a> Index {
                 let mut collection = self.ws.write().unwrap();
                 let (key, v) = e;
                 collection.insert(key.to_string(), v.clone());
-                let mut indexer = self.indexer.clone();
+                let indexer = self.indexer.clone();
                 match indexer {
                     Indexer::Json(j) => {
                         j.path_orders.iter().for_each(|path_order| {
@@ -443,15 +441,15 @@ impl<'a> Index {
                             }
                         });
                     }
-                    Indexer::Integer(i) => {
+                    Indexer::Integer(_) => {
                         let value: Value = v.clone();
                         self.insert_int_index("*", &value, key, v);
                     }
-                    Indexer::Float(f) => {
+                    Indexer::Float(_) => {
                         let value: Value = v.clone();
                         self.insert_float_index("*", &value, key, v)
                     }
-                    Indexer::String(s) => {
+                    Indexer::String(_) => {
                         let value: Value = v.clone();
                         self.insert_string_index("*", &value, key, v)
                     }
@@ -517,9 +515,9 @@ impl<'a> Index {
     ///
     pub fn find_where(&self, field: &str, cond: &str, value: Value) -> QueryResult {
         let op = QueryOperator::from_str(cond);
-        let mut indexer = self.indexer.clone();
+        let indexer = self.indexer.clone();
         let matches = match &indexer {
-            Indexer::Json(j) => {
+            Indexer::Json(_) => {
                 if value.is_i64() {
                     let q = value.as_i64().unwrap();
                     self.query_int_index(field, q, op)
@@ -533,15 +531,15 @@ impl<'a> Index {
                     vec![]
                 }
             }
-            Indexer::Integer(i) => {
+            Indexer::Integer(_) => {
                 let q = value.as_i64().unwrap();
                 self.query_int_index(field, q, op)
             }
-            Indexer::Float(f) => {
+            Indexer::Float(_) => {
                 let q = value.as_f64().unwrap();
                 self.query_float_index(field, q, op)
             }
-            Indexer::String(s) => {
+            Indexer::String(_) => {
                 let q = String::from(value.as_str().unwrap());
                 self.query_string_index(field, q, op)
             }
@@ -583,7 +581,7 @@ impl<'a> Index {
     fn query_float_index(&self, key: &str, q: f64, op: QueryOperator) -> Vec<(String, Value)> {
         let empty_map = MultiMap::new();
         let read_guard = self.float_tree.read().unwrap();
-        let mut float_tree_reader = read_guard.get(key).unwrap_or(&empty_map);
+        let float_tree_reader = read_guard.get(key).unwrap_or(&empty_map);
         let empty_matches: Vec<(String, Value)> = Vec::new();
         match op {
             QueryOperator::EQ => {
@@ -615,7 +613,7 @@ impl<'a> Index {
         let empty_map = MultiMap::new();
         let empty_matches: Vec<(String, Value)> = Vec::new();
         let read_guard = self.str_tree.read().unwrap();
-        let mut str_tree_reader = read_guard.get(key).unwrap_or(&empty_map);
+        let str_tree_reader = read_guard.get(key).unwrap_or(&empty_map);
         match op {
             QueryOperator::EQ => {
                 str_tree_reader.get_vec(&q).unwrap_or(&empty_matches).to_vec()
@@ -760,7 +758,7 @@ impl<'a> Index {
     fn sort(&mut self) {
         //let reader = self.ws.read().unwrap();
         //self.rs.clone_from(reader.deref()
-        let mut indexer = self.indexer.clone();
+        let indexer = self.indexer.clone();
 
         match indexer {
             Indexer::Json(j) => {
@@ -870,7 +868,7 @@ impl<'a> Index {
 
 
         reader.par_iter().for_each(|(k, v)| {
-            let mut indexer = self.indexer.clone();
+            let indexer = self.indexer.clone();
             match indexer {
                 Indexer::Json(j) => {
                     j.path_orders.iter().for_each(|path_order| {
@@ -884,15 +882,15 @@ impl<'a> Index {
                         }
                     })
                 }
-                Indexer::Integer(i) => {
+                Indexer::Integer(_) => {
                     let value: Value = v.clone();
                     self.insert_int_index("*", &value, k, v)
                 }
-                Indexer::Float(f) => {
+                Indexer::Float(_) => {
                     let value: Value = v.clone();
                     self.insert_float_index("*", &value, k, v)
                 }
-                Indexer::String(s) => {
+                Indexer::String(_) => {
                     let value: Value = v.clone();
                     self.insert_string_index("*", &value, k, v)
                 }
@@ -900,15 +898,6 @@ impl<'a> Index {
         });
     }
 }
-
-#[cfg(test)]
-#[macro_use]
-extern crate log;
-
-
-#[cfg(test)]
-#[macro_use]
-extern crate nanoid;
 
 #[cfg(test)]
 mod tests;

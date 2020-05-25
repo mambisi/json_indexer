@@ -3,9 +3,7 @@ use crate::*;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use std::{thread, env, time};
-use env_logger;
-use serde_json::Number;
-use std::time::{Duration, Instant};
+use std::time::{Instant};
 
 #[derive(Serialize, Deserialize)]
 struct Student {
@@ -102,7 +100,7 @@ fn it_works() {
         b.commit()
     });
 
-    let mut res = names_index.find_where("*", "like", Value::String("k*".to_string()));
+    let res = names_index.find_where("*", "like", Value::String("k*".to_string()));
     println!("users whose name starts with K");
     println!("{:?}", res.read());
 
@@ -130,7 +128,7 @@ fn load_json_from_file() {
     };
 
     let indexer = Indexer::Json(IndexJson {
-        path_orders: vec![release_date_order.clone(), title_order.clone()]
+        path_orders: vec![release_date_order, title_order.to_owned()]
     });
 
     let mut index = Index::new(indexer);
@@ -148,7 +146,7 @@ fn load_json_from_file() {
 
     drop(json);
 
-    let mut timer = Instant::now();
+    let timer = Instant::now();
 
     let order_indexer = Indexer::Json(IndexJson {
         path_orders: vec![title_order.clone()]
