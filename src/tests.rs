@@ -156,7 +156,7 @@ fn load_json_from_file() {
 
 
 
-    let mut query = index.find_where("title", "like", Value::String("Jumanj*".to_string()));
+    let mut query = index.find_where("title", "like", Value::String("J*".to_string()));
     let found = query.count();
 
     let completion_time = timer.elapsed().as_millis();
