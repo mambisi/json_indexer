@@ -3,7 +3,7 @@ use crate::*;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use std::{thread, env, time};
-use std::time::{Instant};
+use std::time::Instant;
 
 #[derive(Serialize, Deserialize)]
 struct Student {
@@ -91,7 +91,7 @@ fn it_works() {
     let mut names_index = Index::new(string_indexer);
     names_index.batch(|b| {
         b.insert("user.1".to_owned(), Value::String("Kwadwo".to_string()));
-        b.insert("user.8".to_owned(), Value::String("Kwadwo".to_string()));
+        b.insert("user.8".to_owned(), Value::String("Kwabena".to_string()));
         b.insert("user.2".to_owned(), Value::String("Kwame".to_string()));
         b.insert("user.3".to_owned(), Value::String("Joseph".to_string()));
         b.insert("user.4".to_owned(), Value::String("Jake".to_string()));
@@ -100,10 +100,11 @@ fn it_works() {
         b.commit()
     });
 
+    names_index.remove("user.1");
+
     let res = names_index.find_where("*", "like", Value::String("k*".to_string()));
     println!("users whose name starts with K");
     println!("{:?}", res.read());
-
 }
 
 use std::fs::File;
@@ -152,9 +153,7 @@ fn load_json_from_file() {
         path_orders: vec![title_order.clone()]
     });
 
-
-
-    let mut query = index.find_where("title", "like", Value::String("J*".to_string()));
+    let mut query = index.find_where("title", "like", Value::String("Juman*".to_string()));
     let found = query.count();
 
     let completion_time = timer.elapsed().as_millis();

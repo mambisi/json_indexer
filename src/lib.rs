@@ -58,13 +58,13 @@ impl QueryOperator {
     }
 }
 
-#[derive(Serialize, Deserialize, Clone,Copy)]
+#[derive(Serialize, Deserialize, Clone, Copy)]
 pub enum IndexOrd {
     ASC,
     DESC,
 }
 
-#[derive(Serialize, Deserialize, Clone,Copy)]
+#[derive(Serialize, Deserialize, Clone, Copy)]
 pub struct IndexInt {
     pub ordering: IndexOrd
 }
@@ -186,17 +186,17 @@ impl<'a> Batch<'a> {
 
 impl<'a> BatchTransaction for Batch<'a> {
     fn insert(&mut self, k: String, v: Value) {
-        let (k,v) = match self.filter(&k, &v) {
+        let (k, v) = match self.filter(&k, &v) {
             Ok((k, v)) => {
                 (k.to_owned(), v.clone())
             }
-            Err(_) => {return;}
+            Err(_) => { return; }
         };
-        self.inserts.insert(k,v);
+        self.inserts.insert(k, v);
     }
 
     fn update(&mut self, k: String, v: Value) {
-        let (k,v)= match self.filter(&k, &v) {
+        let (k, v) = match self.filter(&k, &v) {
             Ok((k, v)) => {
                 (k.to_owned(), v.clone())
             }
@@ -462,9 +462,41 @@ impl<'a> Index {
     /// Removes an entry from the index
     pub fn remove(&mut self, k: &str) {
         let mut write_side = self.ws.write().unwrap();
-        write_side.remove(k);
+
+        let v: Value = match write_side.swap_remove(k) {
+            Some(v) => {
+                v
+            }
+            None => {
+                return;
+            }
+        };
         drop(write_side);
-        self.build()
+
+        let indexer = self.indexer.clone();
+        match indexer {
+            Indexer::Json(j) => {
+                j.path_orders.iter().for_each(|path_order| {
+                    let value: Value = v.dot_get_or(&path_order.path, Value::Null).unwrap_or(Value::Null);
+                    if value.is_i64() {} else if value.is_f64() {} else if value.is_string() {
+                        self.remove_string_index(&path_order.path, &value, k)
+                    }
+                })
+            }
+            Indexer::Integer(_) => {
+                let value: Value = v.clone();
+                self.remove_int_index("*", &value, k)
+            }
+            Indexer::Float(_) => {
+                let value: Value = v.clone();
+                self.remove_float_index("*", &value, k)
+            }
+            Indexer::String(_) => {
+                let value: Value = v.clone();
+                self.remove_string_index("*", &value, k)
+            }
+        }
+        //self.build()
     }
 
     /// Batch transaction on the index. you can insert/update/delete multiple entries with one operation by commit the operation with ```b.commit()```
@@ -705,6 +737,51 @@ impl<'a> Index {
             }
             Some(m) => {
                 m.insert(key, (k.to_string(), v.clone()))
+            }
+        }
+    }
+
+
+    fn remove_int_index(&self, field: &str, iv: &Value, k: &str) {
+        let mut int_tree_writer = self.int_tree.write().unwrap();
+        let key = iv.as_i64().unwrap();
+        let mut empty_vec  = vec![];
+        match int_tree_writer.get_mut(field) {
+            None => {}
+            Some(m) => {
+                let items = m.get_vec_mut(&key).unwrap_or(&mut empty_vec);
+                items.retain(|(key, _)| {
+                    k.ne(key)
+                })
+            }
+        }
+    }
+    fn remove_float_index(&self, field: &str, iv: &Value, k: &str) {
+        let mut float_tree_writer = self.float_tree.write().unwrap();
+        let key = iv.as_f64().unwrap();
+        let mut empty_vec  = vec![];
+        match float_tree_writer.get_mut(field) {
+            None => {}
+            Some(m) => {
+                let items = m.get_vec_mut(&FloatKey(key)).unwrap_or(&mut empty_vec);
+                items.retain(|(key, _)| {
+                    k.ne(key)
+                })
+            }
+        }
+    }
+    fn remove_string_index(&self, field: &str, iv: &Value, k: &str) {
+        let mut str_tree_writer = self.str_tree.write().unwrap();
+        let key = iv.as_str().unwrap();
+
+        let mut empty_vec  = vec![];
+        match str_tree_writer.get_mut(field) {
+            None => {}
+            Some(m) => {
+                let items = m.get_vec_mut(key).unwrap_or(&mut empty_vec);
+                items.retain(|(key, _)| {
+                    k.ne(key)
+                })
             }
         }
     }
