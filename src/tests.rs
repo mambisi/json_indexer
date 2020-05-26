@@ -70,6 +70,9 @@ fn it_works() {
 
     let mut students_index = Index::new(indexer);
 
+
+
+
     students_index.batch(|b| {
         &students.iter().for_each(|(k, v)| {
             let json = serde_json::to_value(v).unwrap_or(Value::Null);
@@ -78,11 +81,16 @@ fn it_works() {
         b.commit()
     });
 
+
+
+
     let query = students_index.find_where("state", "eq", Value::String("CA".to_string()));
     println!("Find all students in CA: {:?}", query.read());
 
     let query = students_index.find_where("gpa", "gt", Value::from(3.5));
-    println!("Find all students whose gpa greater than 3.5: {:?}", query.read());
+   // println!("Find all students whose gpa greater than 3.5: {:?}", query.read());
+
+
 
     let string_indexer = Indexer::String(IndexString {
         ordering: IndexOrd::ASC
@@ -91,6 +99,7 @@ fn it_works() {
     let mut names_index = Index::new(string_indexer);
     names_index.batch(|b| {
         b.insert("user.1".to_owned(), Value::String("Kwadwo".to_string()));
+        b.insert("user.9".to_owned(), Value::String("Kwadwo".to_string()));
         b.insert("user.8".to_owned(), Value::String("Kwabena".to_string()));
         b.insert("user.2".to_owned(), Value::String("Kwame".to_string()));
         b.insert("user.3".to_owned(), Value::String("Joseph".to_string()));
@@ -100,10 +109,12 @@ fn it_works() {
         b.commit()
     });
 
+    println!("Index Tree: {}", serde_json::to_string_pretty(&names_index).unwrap());
+
     names_index.remove("user.1");
     let res = names_index.find_where("*", "like", Value::String("k*".to_string()));
-    println!("users whose name starts with K");
-    println!("{:?}", res.read());
+    // println!("users whose name starts with K");
+    // println!("{:?}", res.read());
 }
 
 use std::fs::File;
@@ -145,6 +156,9 @@ fn load_json_from_file() {
     });
 
     drop(json);
+
+
+
 
     let timer = Instant::now();
 
