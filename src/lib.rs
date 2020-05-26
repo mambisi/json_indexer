@@ -26,6 +26,9 @@ use serde::{Serialize, Deserialize};
 use std::collections::{HashSet, HashMap, BTreeMap};
 use std::sync::{RwLock, Arc};
 use std::hash::{Hash, Hasher};
+use std::str::FromStr;
+use std::fmt;
+use std::error;
 
 #[derive(Serialize, Deserialize, Clone)]
 pub enum Indexer {
@@ -35,23 +38,34 @@ pub enum Indexer {
     String(IndexString),
 }
 
-pub enum QueryOperator {
+pub enum Op {
     EQ,
     LT,
     GT,
     LIKE,
-    UNKNOWN,
 }
 
-impl QueryOperator {
-    pub fn from_str(op: &str) -> Self {
-        let op = op.to_lowercase();
+#[derive(Debug, Clone)]
+pub struct UnknownOperatorError;
+
+impl fmt::Display for UnknownOperatorError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "invalid operator")
+    }
+}
+
+impl error::Error for UnknownOperatorError {}
+
+impl FromStr for Op {
+    type Err = UnknownOperatorError;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let op = s.to_lowercase();
         match op.as_str() {
-            "eq" => QueryOperator::EQ,
-            "lt" => QueryOperator::LT,
-            "gt" => QueryOperator::GT,
-            "like" => QueryOperator::LIKE,
-            _ => { QueryOperator::UNKNOWN }
+            "eq" => Ok(Op::EQ),
+            "lt" => Ok(Op::LT),
+            "gt" => Ok(Op::GT),
+            "like" => Ok(Op::LIKE),
+            _ => { Err(UnknownOperatorError) }
         }
     }
 }
@@ -119,13 +133,13 @@ impl PartialOrd for FloatKey {
 
 impl Eq for FloatKey {}
 
-type MultiMap<K1,K2,V> =  BTreeMap<K1, HashMap<K2,V>>;
+type MultiMap<K1, K2, V> = BTreeMap<K1, HashMap<K2, V>>;
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct Index {
     pub indexer: Indexer,
     int_tree: Arc<RwLock<HashMap<String, MultiMap<i64, String, Value>>>>,
-    str_tree: Arc<RwLock<HashMap<String, MultiMap<String,String,Value>>>>,
+    str_tree: Arc<RwLock<HashMap<String, MultiMap<String, String, Value>>>>,
     float_tree: Arc<RwLock<HashMap<String, MultiMap<FloatKey, String, Value>>>>,
     items: Arc<RwLock<IndexMap<String, Value>>>,
 
@@ -531,6 +545,7 @@ impl<'a> Index {
         f(&mut batch);
     }
 
+    #[deprecated(since = "0.2.5", note = "Please use the size() instead")]
     pub fn iter(&self, f: impl Fn((&String, &Value)) + std::marker::Sync + std::marker::Send) {
         let mut new_index = self.clone();
         new_index.sort();
@@ -538,6 +553,7 @@ impl<'a> Index {
         reader.iter().for_each(f);
     }
 
+    #[deprecated(since = "0.2.5", note = "Please use the size() instead")]
     pub fn par_iter(&self, f: impl Fn((&String, &Value)) + std::marker::Sync + std::marker::Send) {
         let mut new_index = self.clone();
         new_index.sort();
@@ -545,6 +561,19 @@ impl<'a> Index {
         reader.par_iter().for_each(f);
     }
 
+    pub fn get_each_item(&self, f: impl Fn((&String, &Value)) + std::marker::Sync + std::marker::Send) {
+        let mut new_index = self.clone();
+        new_index.sort();
+        let reader = new_index.items.read().unwrap();
+        reader.iter().for_each(f);
+    }
+
+    pub fn par_get_each_item(&self, f: impl Fn((&String, &Value)) + std::marker::Sync + std::marker::Send) {
+        let mut new_index = self.clone();
+        new_index.sort();
+        let reader = new_index.items.read().unwrap();
+        reader.par_iter().for_each(f);
+    }
 
     ///Query on an index. by using conditional operators
     /// - `eq` Equals
@@ -558,8 +587,7 @@ impl<'a> Index {
     ///   println!("Find all students in CA: {:?}", query());
     ///  ```
     ///
-    pub fn find_where(&self, field: &str, cond: &str, value: Value) -> QueryResult {
-        let op = QueryOperator::from_str(cond);
+    pub fn find_where(&self, field: &str, op: Op, value: Value) -> QueryResult {
         let indexer = self.indexer.clone();
         let matches = match &indexer {
             Indexer::Json(_) => {
@@ -589,102 +617,100 @@ impl<'a> Index {
                 self.query_string_index(field, q, op)
             }
         };
-        let matches = matches.into_iter().map(|(k,v)|{(k,v)}).collect();
+        let matches = matches.into_iter().map(|(k, v)| { (k, v) }).collect();
         QueryResult::new(matches, indexer)
     }
 
-    fn query_int_index(&self, key: &str, q: i64, op: QueryOperator) -> HashMap<String, Value> {
+    fn query_int_index(&self, key: &str, q: i64, op: Op) -> HashMap<String, Value> {
         let empty_map = MultiMap::new();
         let empty_matches: HashMap<String, Value> = HashMap::new();
         let read_guard = self.int_tree.read().unwrap();
         let int_tree_reader = read_guard.get(key).unwrap_or(&empty_map);
         match op {
-            QueryOperator::EQ => {
+            Op::EQ => {
                 let m = int_tree_reader.get(&q).unwrap_or(&empty_matches);
                 m.clone()
             }
-            QueryOperator::LT => {
+            Op::LT => {
                 let mut matches: HashMap<String, Value> = HashMap::new();
                 int_tree_reader.iter().for_each(|(k, v)| {
                     if k.lt(&q) {
-                        matches.extend(v.iter().map(|(k,v)|{(k.to_string(),v.clone())}));
+                        matches.extend(v.iter().map(|(k, v)| { (k.to_string(), v.clone()) }));
                     }
                 });
                 matches
             }
-            QueryOperator::GT => {
+            Op::GT => {
                 let mut matches: HashMap<String, Value> = HashMap::new();
                 int_tree_reader.iter().for_each(|(k, v)| {
                     if k.gt(&q) {
-                        matches.extend(v.iter().map(|(k,v)|{(k.to_string(),v.clone())}));
+                        matches.extend(v.iter().map(|(k, v)| { (k.to_string(), v.clone()) }));
                     }
                 });
                 matches
             }
-            QueryOperator::LIKE => { HashMap::new() }
-            QueryOperator::UNKNOWN => { HashMap::new() }
+            Op::LIKE => { HashMap::new() }
         }
     }
-    fn query_float_index(&self, key: &str, q: f64, op: QueryOperator) -> HashMap<String, Value> {
+    fn query_float_index(&self, key: &str, q: f64, op: Op) -> HashMap<String, Value> {
         let empty_map = MultiMap::new();
         let read_guard = self.float_tree.read().unwrap();
         let float_tree_reader = read_guard.get(key).unwrap_or(&empty_map);
         let empty_matches: HashMap<String, Value> = HashMap::new();
         match op {
-            QueryOperator::EQ => {
+            Op::EQ => {
                 float_tree_reader.get(&FloatKey(OrderedFloat(q).0)).unwrap_or(&empty_matches).clone()
             }
-            QueryOperator::LT => {
+            Op::LT => {
                 let mut matches: HashMap<String, Value> = HashMap::new();
                 float_tree_reader.iter().for_each(|(k, v)| {
                     if OrderedFloat(k.0).lt(&OrderedFloat(q)) {
-                        matches.extend(v.iter().map(|(k,v)|{(k.to_string(),v.clone())}));
+                        matches.extend(v.iter().map(|(k, v)| { (k.to_string(), v.clone()) }));
                     }
                 });
                 matches
             }
-            QueryOperator::GT => {
+            Op::GT => {
                 let mut matches: HashMap<String, Value> = HashMap::new();
                 float_tree_reader.iter().for_each(|(k, v)| {
                     if OrderedFloat(k.0).gt(&OrderedFloat(q)) {
-                        matches.extend(v.iter().map(|(k,v)|{(k.to_string(),v.clone())}));
+                        matches.extend(v.iter().map(|(k, v)| { (k.to_string(), v.clone()) }));
                     }
                 });
                 matches
             }
-            QueryOperator::LIKE => { HashMap::new() }
-            QueryOperator::UNKNOWN => { HashMap::new() }
+            Op::LIKE => { HashMap::new() }
         }
     }
-    fn query_string_index(&self, key: &str, q: String, op: QueryOperator) -> HashMap<String, Value> {
+    fn query_string_index(&self, key: &str, q: String, op: Op) -> HashMap<String, Value> {
         let empty_map = MultiMap::new();
         let empty_matches: HashMap<String, Value> = HashMap::new();
         let read_guard = self.str_tree.read().unwrap();
         let str_tree_reader = read_guard.get(key).unwrap_or(&empty_map);
         match op {
-            QueryOperator::EQ => {
+            Op::EQ => {
                 str_tree_reader.get(&q).unwrap_or(&empty_matches).clone()
             }
-            QueryOperator::LT => {
-                let mut matches  = HashMap::new();
+            Op::LT => {
+                let mut matches = HashMap::new();
                 str_tree_reader.iter().for_each(|(k, v)| {
                     if k.lt(&q) {
-                        matches.extend(v.iter().map(|(k,v)|{(k.to_string(),v.clone())}));
+                        matches.extend(v.iter().map(|(k, v)| { (k.to_string(), v.clone()) }));
                     }
                 });
                 matches
             }
-            QueryOperator::GT => {
-                let mut matches  = HashMap::new();
+            Op::GT => {
+                let mut matches = HashMap::new();
                 str_tree_reader.iter().for_each(|(k, v)| {
                     if k.gt(&q) {
-                        matches.extend(v.iter().map(|(k,v)|{(k.to_string(),v.clone())}));
+                        matches.extend(v.iter().map(|(k, v)| { (k.to_string(), v.clone()) }));
                     }
                 });
                 matches
             }
-            QueryOperator::LIKE => {
-                let mut matches  = HashMap::new();
+            Op::LIKE => {
+                let mut matches = HashMap::new();
                 let options = glob::MatchOptions {
                     case_sensitive: false,
                     require_literal_separator: false,
@@ -699,19 +725,15 @@ impl<'a> Index {
 
                 str_tree_reader.iter().for_each(|(k, v)| {
                     if glob_matcher.matches_with(k, options) {
-                        matches.extend(v.iter().map(|(k,v)|{(k.to_string(),v.clone())}));
+                        matches.extend(v.iter().map(|(k, v)| { (k.to_string(), v.clone()) }));
                     }
                 });
                 matches
-            }
-            QueryOperator::UNKNOWN => {
-                HashMap::new()
             }
         }
     }
 
     fn insert_int_index(&self, field: &str, iv: &Value, k: &str, v: &Value) {
-
         let mut int_tree_writer = self.int_tree.write().unwrap();
 
         let key = iv.as_i64().unwrap();
@@ -719,28 +741,28 @@ impl<'a> Index {
         match int_tree_writer.get_mut(field) {
             None => {
                 let mut m = MultiMap::new();
-                match  m.get_mut(&key){
+                match m.get_mut(&key) {
                     None => {
                         let mut new_map = HashMap::new();
-                        new_map.insert(k.to_string(),v.clone());
-                        m.insert(key,new_map);
-                        int_tree_writer.insert(field.to_string(),m);
-                    },
+                        new_map.insert(k.to_string(), v.clone());
+                        m.insert(key, new_map);
+                        int_tree_writer.insert(field.to_string(), m);
+                    }
                     Some(b) => {
-                        b.insert(k.to_string(),v.clone());
-                    },
+                        b.insert(k.to_string(), v.clone());
+                    }
                 }
             }
             Some(m) => {
                 match m.get_mut(&key) {
                     None => {
                         let mut new_map = HashMap::new();
-                        new_map.insert(k.to_string(),v.clone());
-                        m.insert(key,new_map);
-                    },
+                        new_map.insert(k.to_string(), v.clone());
+                        m.insert(key, new_map);
+                    }
                     Some(b) => {
                         b.insert(k.to_string(), v.clone());
-                    },
+                    }
                 }
             }
         };
@@ -751,15 +773,15 @@ impl<'a> Index {
         match float_tree_writer.get_mut(field) {
             None => {
                 let mut m = MultiMap::new();
-                match  m.get_mut(&FloatKey(key)){
+                match m.get_mut(&FloatKey(key)) {
                     None => {
                         let mut new_map = HashMap::new();
-                        new_map.insert(k.to_string(),v.clone());
-                        m.insert(FloatKey(key),new_map);
-                        float_tree_writer.insert(field.to_string(),m);
-                    },
+                        new_map.insert(k.to_string(), v.clone());
+                        m.insert(FloatKey(key), new_map);
+                        float_tree_writer.insert(field.to_string(), m);
+                    }
                     Some(b) => {
-                        b.insert(k.to_string(),v.clone());
+                        b.insert(k.to_string(), v.clone());
                     }
                 };
             }
@@ -767,12 +789,12 @@ impl<'a> Index {
                 match m.get_mut(&FloatKey(key)) {
                     None => {
                         let mut new_map = HashMap::new();
-                        new_map.insert(k.to_string(),v.clone());
-                        m.insert(FloatKey(key),new_map);
-                    },
+                        new_map.insert(k.to_string(), v.clone());
+                        m.insert(FloatKey(key), new_map);
+                    }
                     Some(b) => {
                         b.insert(k.to_string(), v.clone());
-                    },
+                    }
                 }
             }
         };
@@ -783,28 +805,28 @@ impl<'a> Index {
         match str_tree_writer.get_mut(field) {
             None => {
                 let mut m = MultiMap::new();
-                match  m.get_mut(&key){
+                match m.get_mut(&key) {
                     None => {
                         let mut new_map = HashMap::new();
-                        new_map.insert(k.to_string(),v.clone());
-                        m.insert(key,new_map);
-                        str_tree_writer.insert(field.to_string(),m);
-                    },
+                        new_map.insert(k.to_string(), v.clone());
+                        m.insert(key, new_map);
+                        str_tree_writer.insert(field.to_string(), m);
+                    }
                     Some(b) => {
-                        b.insert(k.to_string(),v.clone());
-                    },
+                        b.insert(k.to_string(), v.clone());
+                    }
                 }
             }
             Some(m) => {
                 match m.get_mut(&key) {
                     None => {
                         let mut new_map = HashMap::new();
-                        new_map.insert(k.to_string(),v.clone());
-                        m.insert(key,new_map);
-                    },
+                        new_map.insert(k.to_string(), v.clone());
+                        m.insert(key, new_map);
+                    }
                     Some(b) => {
                         b.insert(k.to_string(), v.clone());
-                    },
+                    }
                 }
             }
         };
@@ -858,7 +880,6 @@ impl<'a> Index {
         }
     }
 
-
     fn filter(&mut self, k: &'a String, v: &'a Value) -> Result<(&'a String, &'a Value), ()> {
         match &self.indexer {
             Indexer::Json(j) => {
@@ -899,7 +920,13 @@ impl<'a> Index {
         }
     }
 
+    #[deprecated(since = "0.2.5", note = "Please use the size() instead")]
     pub fn count(&self) -> usize {
+        let reader = self.items.read().unwrap();
+        reader.len()
+    }
+
+    pub fn size(&self) -> usize {
         let reader = self.items.read().unwrap();
         reader.len()
     }
@@ -1047,6 +1074,8 @@ impl<'a> Index {
         });
     }
 }
+
+
 
 #[cfg(test)]
 mod tests;

@@ -31,7 +31,7 @@ Single index
 
 > This example demonstrates how you can use json indexer to index a json value
 ```rust
-let mut students: HashMap<String, Student> = HashMap::new();
+   let mut students: HashMap<String, Student> = HashMap::new();
     students.insert("student:0".to_owned(), Student {
         name: "Mambisi".to_owned(),
         age: 21,
@@ -86,6 +86,9 @@ let mut students: HashMap<String, Student> = HashMap::new();
 
     let mut students_index = Index::new(indexer);
 
+
+
+
     students_index.batch(|b| {
         &students.iter().for_each(|(k, v)| {
             let json = serde_json::to_value(v).unwrap_or(Value::Null);
@@ -94,13 +97,16 @@ let mut students: HashMap<String, Student> = HashMap::new();
         b.commit()
     });
 
-    println!("{:?}", students_index.read());
 
-    let query = students_index.find_where("state", "eq", Value::String("CA".to_string()));
+
+
+    let query = students_index.find_where("state", Op::EQ, Value::String("CA".to_string()));
     println!("Find all students in CA: {:?}", query.read());
 
-    let query = students_index.find_where("gpa", "gt", Value::from(3.5));
+    let query = students_index.find_where("gpa", Op::GT, Value::from(3.5));
     println!("Find all students whose gpa greater than 3.5: {:?}", query.read());
+
+
 
     let string_indexer = Indexer::String(IndexString {
         ordering: IndexOrd::ASC
@@ -109,7 +115,8 @@ let mut students: HashMap<String, Student> = HashMap::new();
     let mut names_index = Index::new(string_indexer);
     names_index.batch(|b| {
         b.insert("user.1".to_owned(), Value::String("Kwadwo".to_string()));
-        b.insert("user.8".to_owned(), Value::String("Kwadwo".to_string()));
+        b.insert("user.9".to_owned(), Value::String("Kwadwo".to_string()));
+        b.insert("user.8".to_owned(), Value::String("Kwabena".to_string()));
         b.insert("user.2".to_owned(), Value::String("Kwame".to_string()));
         b.insert("user.3".to_owned(), Value::String("Joseph".to_string()));
         b.insert("user.4".to_owned(), Value::String("Jake".to_string()));
@@ -118,7 +125,10 @@ let mut students: HashMap<String, Student> = HashMap::new();
         b.commit()
     });
 
-    let mut res = names_index.find_where("*", "like", Value::String("k*".to_string()));
+    println!("Index Tree: {}", serde_json::to_string_pretty(&names_index).unwrap());
+
+    names_index.remove("user.1");
+    let res = names_index.find_where("*", Op::LIKE, Value::String("k*".to_string()));
     println!("users whose name starts with K");
     println!("{:?}", res.read());
 /* Output
@@ -161,7 +171,7 @@ Multi index with dot path
     };
 
     let indexer = Indexer::Json(IndexJson {
-        path_orders: vec![release_date_order.clone(), title_order]
+        path_orders: vec![release_date_order, title_order.to_owned()]
     });
 
     let mut index = Index::new(indexer);
@@ -179,13 +189,16 @@ Multi index with dot path
 
     drop(json);
 
-    let mut timer = Instant::now();
+
+
+
+    let timer = Instant::now();
 
     let order_indexer = Indexer::Json(IndexJson {
-        path_orders: vec![release_date_order.clone()]
+        path_orders: vec![title_order.clone()]
     });
 
-    let mut query = index.find_where("title", "like", Value::String(String::from("Jumanji*")));
+    let mut query = index.find_where("title", Op::LIKE, Value::String("Jumanji*".to_string()));
     let found = query.count();
 
     let completion_time = timer.elapsed().as_millis();
