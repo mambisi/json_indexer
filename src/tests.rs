@@ -85,10 +85,10 @@ fn it_works() {
 
 
     let query = students_index.find_where("state", Op::EQ, Value::String("CA".to_string()));
-    println!("Find all students in CA: {:?}", query.read());
+    println!("Find all students in CA: {:?}", query.get());
 
     let query = students_index.find_where("gpa", Op::GT, Value::from(3.5));
-    println!("Find all students whose gpa greater than 3.5: {:?}", query.read());
+    println!("Find all students whose gpa greater than 3.5: {:?}", query.get());
 
 
 
@@ -114,7 +114,7 @@ fn it_works() {
     names_index.remove("user.1");
     let res = names_index.find_where("*", Op::LIKE, Value::String("k*".to_string()));
     println!("users whose name starts with K");
-    println!("{:?}", res.read());
+    println!("{:?}", res.get());
 }
 
 use std::fs::File;
@@ -157,16 +157,13 @@ fn load_json_from_file() {
 
     drop(json);
 
-
-
-
     let timer = Instant::now();
 
     let order_indexer = Indexer::Json(IndexJson {
         path_orders: vec![title_order.clone()]
     });
 
-    let mut query = index.find_where("title", Op::LIKE, Value::String("Jumanji*".to_string()));
+    let mut query = index.find_where("title", Op::LIKE, Value::String("*".to_string()));
     let found = query.count();
 
     let completion_time = timer.elapsed().as_millis();
@@ -174,7 +171,7 @@ fn load_json_from_file() {
 
 
     println!("Showing Results: release date");
-    query.order_by(order_indexer).limit(10).iter(|(k, v)| {
+    query.order_by(order_indexer).limit(10).get().iter().for_each(|(k, v)| {
         println!("{}:{}", k, serde_json::to_string_pretty(v).unwrap());
     })
 }

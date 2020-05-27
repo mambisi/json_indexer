@@ -29,6 +29,7 @@ use std::hash::{Hash, Hasher};
 use std::str::FromStr;
 use std::fmt;
 use std::error;
+use std::ops::Deref;
 
 #[derive(Serialize, Deserialize, Clone)]
 pub enum Indexer {
@@ -301,7 +302,7 @@ impl<'a> QueryResult {
         }
     }
 
-    pub fn read(&self) -> &Vec<(String, Value)> {
+    pub fn get(&self) -> &Vec<(String, Value)> {
         return &self.matches;
     }
 
@@ -406,17 +407,13 @@ pub struct OrderedResult<'a> {
 }
 
 impl<'a> OrderedResult<'a> {
-    pub fn iter(&'a self, f: impl FnMut(&'a (std::string::String, serde_json::Value)) -> ()) {
-        self.matches.iter().for_each(f);
+
+    pub fn get(&self) -> &Vec<(String, Value)> {
+        return &self.matches;
     }
 
     pub fn count(&self) -> usize {
         self.matches.len()
-    }
-
-    pub fn par_iter(&'a self, f: impl Fn(&'a (std::string::String, serde_json::Value)) -> () + std::marker::Sync + std::marker::Send) {
-        //self.rs.par_iter().for_each(f);
-        self.matches.par_iter().for_each(f);
     }
 
     pub fn limit(&'a mut self, size: usize) -> &mut Self {
@@ -561,14 +558,14 @@ impl<'a> Index {
         reader.par_iter().for_each(f);
     }
 
-    pub fn get_each_item(&self, f: impl Fn((&String, &Value)) + std::marker::Sync + std::marker::Send) {
+    pub fn get_all_items(&self, f: impl Fn((&String, &Value)) + std::marker::Sync + std::marker::Send) {
         let mut new_index = self.clone();
         new_index.sort();
         let reader = new_index.items.read().unwrap();
         reader.iter().for_each(f);
     }
 
-    pub fn par_get_each_item(&self, f: impl Fn((&String, &Value)) + std::marker::Sync + std::marker::Send) {
+    pub fn par_get_all_items(&self, f: impl Fn((&String, &Value)) + std::marker::Sync + std::marker::Send) {
         let mut new_index = self.clone();
         new_index.sort();
         let reader = new_index.items.read().unwrap();
@@ -1072,6 +1069,16 @@ impl<'a> Index {
                 }
             }
         });
+    }
+
+    pub fn get_items(&self) -> IndexMap<String,Value>{
+        let mut new_index = self.clone();
+        new_index.sort();
+        let reader = new_index.items.read().unwrap();
+        let map = reader.deref();
+        let mut cloned_map = IndexMap::new();
+        cloned_map.clone_from(map);
+        cloned_map
     }
 }
 
