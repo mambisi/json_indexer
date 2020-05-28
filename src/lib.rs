@@ -297,7 +297,7 @@ impl<'a> QueryResult {
     pub fn and_then(&'a mut self) -> &'a Index {
         //let mut new_index = Index::new(self.indexer.clone());
         for (k, v) in self.matches.iter() {
-            self.index.insert(k.to_owned(), v.clone())
+            self.index.insert(k, v.clone())
         }
         &self.index
     }
@@ -456,8 +456,9 @@ impl<'a> Index {
     }
 
     /// Inserts a new entry or overrides a previous entry in the index
-    pub fn insert<V>(&mut self, k: String, v: V) where V: Serialize + Deserialize<'a> {
-        let v = serde_json::to_value(v).unwrap();
+    pub fn insert<V>(&mut self, key: &str, value: V) where V: Serialize + Deserialize<'a> {
+        let k = key.to_string();
+        let v = serde_json::to_value(value).unwrap();
         match self.filter(&k, &v) {
             Ok(e) => {
                 let mut collection = self.items.write().unwrap();
@@ -543,7 +544,7 @@ impl<'a> Index {
     /// let mut names_index = Index::new(string_indexer);
     /// names_index.batch(|b| {
     ///     b.delete("user.4");
-    ///     b.insert("user.1", "Kwadwo".to_string()));
+    ///     b.insert("user.1", "Kwadwo".to_string());
     ///     b.insert("user.2", Value::String("Kwame".to_string()));
     ///     b.update("user.3", Value::String("Joseph".to_string()));
     ///     b.commit()

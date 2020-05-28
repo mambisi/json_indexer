@@ -34,33 +34,33 @@ fn it_works() {
     });
 
     let mut students_index = Index::new(indexer);
-    students_index.insert("student:0".to_owned(), Student {
+    students_index.insert("student:0", Student {
         name: "Mambisi".to_owned(),
         age: 21,
         state: "CA".to_owned(),
         gpa: 3.1,
     });
-    students_index.insert("student:1".to_owned(), Student {
+    students_index.insert("student:1", Student {
         name: "Joseph".to_owned(),
         age: 12,
         state: "CA".to_owned(),
         gpa: 3.1,
     });
-    students_index.insert("student:2".to_owned(), Student {
+    students_index.insert("student:2", Student {
         name: "Elka".to_owned(),
         age: 12,
         state: "FL".to_owned(),
         gpa: 4.0,
     });
 
-    students_index.insert("student:18".to_owned(), Student {
+    students_index.insert("student:18", Student {
         name: "Alex".to_owned(),
         age: 15,
         state: "NY".to_owned(),
         gpa: 3.7,
     });
 
-    students_index.insert("student:18".to_owned(), Student {
+    students_index.insert("student:18", Student {
         name: "Jackson".to_owned(),
         age: 17,
         state: "NY".to_owned(),
@@ -208,7 +208,7 @@ fn load_json_from_with_incremental_inserts() {
             list.iter().for_each(|v| {
                 let key = v.dot_get_or("id", Value::String("".to_string())).unwrap();
                 let mut idx = index.write().unwrap();
-                idx.insert(String::from(key.to_string()), v.clone())
+                idx.insert(key.as_str().unwrap(), v.clone())
             });
             let total_time = timer.elapsed().as_secs_f64();
             println!("Indexed list of size: {:?} in {} secs", list.len(), total_time);
