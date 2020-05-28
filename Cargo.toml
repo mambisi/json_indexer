@@ -1,6 +1,6 @@
 [package]
 name = "indexer"
-version = "0.2.5"
+version = "0.2.6"
 authors = ["Mambisi Zempare <lilbizi96@gmail.com>"]
 edition = "2018"
 repository = "https://github.com/mambisi/json_indexer"

@@ -29,7 +29,6 @@ use std::hash::{Hash, Hasher};
 use std::str::FromStr;
 use std::fmt;
 use std::error;
-use std::ops::Deref;
 
 #[derive(Serialize, Deserialize, Clone)]
 pub enum Indexer {
@@ -146,10 +145,10 @@ pub struct Index {
 
 }
 
-pub trait BatchTransaction {
-    fn insert(&mut self, k: String, v: Value);
-    fn update(&mut self, k: String, v: Value);
-    fn delete(&mut self, k: String);
+pub trait BatchTransaction<'a> {
+    fn insert<V>(&mut self, k: &str, v: V) where V : Serialize + Deserialize<'a>;
+    fn update<V>(&mut self, k: &str, v: V) where V : Serialize + Deserialize<'a>;
+    fn delete(&mut self, k: &str);
     fn commit(&mut self);
 }
 
@@ -212,8 +211,10 @@ impl<'a> Batch<'a> {
     }
 }
 
-impl<'a> BatchTransaction for Batch<'a> {
-    fn insert(&mut self, k: String, v: Value) {
+impl<'a> BatchTransaction<'a> for Batch<'a> {
+    fn insert<V>(&mut self, k: &str, v: V) where V: Serialize + Deserialize<'a> {
+        let v = serde_json::to_value(v).unwrap();
+        let k = k.to_string();
         let (k, v) = match self.filter(&k, &v) {
             Ok((k, v)) => {
                 (k.to_owned(), v.clone())
@@ -223,7 +224,9 @@ impl<'a> BatchTransaction for Batch<'a> {
         self.inserts.insert(k, v);
     }
 
-    fn update(&mut self, k: String, v: Value) {
+    fn update<V>(&mut self, k: &str, v: V) where V: Serialize + Deserialize<'a> {
+        let v = serde_json::to_value(v).unwrap();
+        let k = k.to_string();
         let (k, v) = match self.filter(&k, &v) {
             Ok((k, v)) => {
                 (k.to_owned(), v.clone())
@@ -235,8 +238,8 @@ impl<'a> BatchTransaction for Batch<'a> {
         self.updates.insert(k, v);
     }
 
-    fn delete(&mut self, k: String) {
-        self.deletes.insert(k);
+    fn delete(&mut self, k: &str) {
+        self.deletes.insert(k.to_string());
     }
 
     fn commit(&mut self) {
@@ -407,7 +410,6 @@ pub struct OrderedResult<'a> {
 }
 
 impl<'a> OrderedResult<'a> {
-
     pub fn get(&self) -> &Vec<(String, Value)> {
         return &self.matches;
     }
@@ -445,7 +447,8 @@ impl<'a> Index {
     }
 
     /// Inserts a new entry or overrides a previous entry in the index
-    pub fn insert(&mut self, k: String, v: Value) {
+    pub fn insert<V>(&mut self, k: String, v: V) where V: Serialize + Deserialize<'a> {
+        let v = serde_json::to_value(v).unwrap();
         match self.filter(&k, &v) {
             Ok(e) => {
                 let mut collection = self.items.write().unwrap();
@@ -530,10 +533,10 @@ impl<'a> Index {
     /// use serde_json::Value;
     /// let mut names_index = Index::new(string_indexer);
     /// names_index.batch(|b| {
-    ///     b.delete("user.4".to_owned());
-    ///     b.insert("user.1".to_owned(), Value::String("Kwadwo".to_string()));
-    ///     b.insert("user.2".to_owned(), Value::String("Kwame".to_string()));
-    ///     b.update("user.3".to_owned(), Value::String("Joseph".to_string()));
+    ///     b.delete("user.4");
+    ///     b.insert("user.1", "Kwadwo".to_string()));
+    ///     b.insert("user.2", Value::String("Kwame".to_string()));
+    ///     b.update("user.3", Value::String("Joseph".to_string()));
     ///     b.commit()
     /// });
     /// ```
@@ -580,11 +583,12 @@ impl<'a> Index {
     ///
     /// ## Example
     ///  ```rust
-    ///   let query = students_index.find_where("state", "eq", Value::String("CA".to_string()));
+    ///   let query = students_index.find_where("state", Op::EQ, "CA");
     ///   println!("Find all students in CA: {:?}", query());
     ///  ```
     ///
-    pub fn find_where(&self, field: &str, op: Op, value: Value) -> QueryResult {
+    pub fn find_where<V>(&self, field: &str, op: Op, value: V) -> QueryResult where V: Serialize + Deserialize<'a> {
+        let value = serde_json::to_value(value).unwrap();
         let indexer = self.indexer.clone();
         let matches = match &indexer {
             Indexer::Json(_) => {
@@ -1071,17 +1075,14 @@ impl<'a> Index {
         });
     }
 
-    pub fn get_items(&self) -> IndexMap<String,Value>{
+    pub fn get_items(&self) -> Vec<(String, Value)>{
         let mut new_index = self.clone();
         new_index.sort();
         let reader = new_index.items.read().unwrap();
-        let map = reader.deref();
-        let mut cloned_map = IndexMap::new();
-        cloned_map.clone_from(map);
-        cloned_map
+        let items = reader.par_iter().map(|(k, v)| { (k.to_string(), v.clone())}).collect();
+        items
     }
 }
-
 
 
 #[cfg(test)]

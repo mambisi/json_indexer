@@ -5,7 +5,7 @@ use std::sync::{Arc, RwLock};
 use std::{thread, env, time};
 use std::time::Instant;
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize,Clone)]
 struct Student {
     name: String,
     age: u8,
@@ -75,8 +75,7 @@ fn it_works() {
 
     students_index.batch(|b| {
         &students.iter().for_each(|(k, v)| {
-            let json = serde_json::to_value(v).unwrap_or(Value::Null);
-            b.insert(k.to_owned(), json);
+            b.insert(k, v.clone());
         });
         b.commit()
     });
@@ -84,10 +83,10 @@ fn it_works() {
 
 
 
-    let query = students_index.find_where("state", Op::EQ, Value::String("CA".to_string()));
+    let query = students_index.find_where("state", EQ, "CA");
     println!("Find all students in CA: {:?}", query.get());
 
-    let query = students_index.find_where("gpa", Op::GT, Value::from(3.5));
+    let query = students_index.find_where("gpa", GT, 3.5);
     println!("Find all students whose gpa greater than 3.5: {:?}", query.get());
 
 
@@ -98,14 +97,14 @@ fn it_works() {
 
     let mut names_index = Index::new(string_indexer);
     names_index.batch(|b| {
-        b.insert("user.1".to_owned(), Value::String("Kwadwo".to_string()));
-        b.insert("user.9".to_owned(), Value::String("Kwadwo".to_string()));
-        b.insert("user.8".to_owned(), Value::String("Kwabena".to_string()));
-        b.insert("user.2".to_owned(), Value::String("Kwame".to_string()));
-        b.insert("user.3".to_owned(), Value::String("Joseph".to_string()));
-        b.insert("user.4".to_owned(), Value::String("Jake".to_string()));
-        b.insert("user.5".to_owned(), Value::String("Mambisi".to_string()));
-        b.insert("user.6".to_owned(), Value::String("Ama".to_string()));
+        b.insert("user.1", "Kwadwo");
+        b.insert("user.9", "Kwadwo");
+        b.insert("user.8", "Kwabena");
+        b.insert("user.2", "Kwame");
+        b.insert("user.3", "Joseph");
+        b.insert("user.4", "Jake");
+        b.insert("user.5", "Mambisi");
+        b.insert("user.6", "Ama");
         b.commit()
     });
 
@@ -119,6 +118,7 @@ fn it_works() {
 
 use std::fs::File;
 use std::io::BufReader;
+use crate::Op::{EQ, GT};
 
 #[test]
 fn load_json_from_file() {
@@ -148,7 +148,7 @@ fn load_json_from_file() {
         let timer = Instant::now();
         list.iter().for_each(|v| {
             let key = v.dot_get_or("id", Value::String("".to_string())).unwrap();
-            b.insert(String::from(key.as_str().unwrap().to_string()), v.clone())
+            b.insert(key.as_str().unwrap(), v.clone())
         });
         b.commit();
         let total_time = timer.elapsed().as_secs_f64();
@@ -163,7 +163,7 @@ fn load_json_from_file() {
         path_orders: vec![title_order.clone()]
     });
 
-    let mut query = index.find_where("title", Op::LIKE, Value::String("*".to_string()));
+    let mut query = index.find_where("title", Op::LIKE, "*");
     let found = query.count();
 
     let completion_time = timer.elapsed().as_millis();
