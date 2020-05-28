@@ -15,40 +15,6 @@ struct Student {
 
 #[test]
 fn it_works() {
-    let mut students: HashMap<String, Student> = HashMap::new();
-    students.insert("student:0".to_owned(), Student {
-        name: "Mambisi".to_owned(),
-        age: 21,
-        state: "CA".to_owned(),
-        gpa: 3.1,
-    });
-    students.insert("student:1".to_owned(), Student {
-        name: "Joseph".to_owned(),
-        age: 12,
-        state: "CA".to_owned(),
-        gpa: 3.1,
-    });
-    students.insert("student:2".to_owned(), Student {
-        name: "Elka".to_owned(),
-        age: 12,
-        state: "FL".to_owned(),
-        gpa: 4.0,
-    });
-
-    students.insert("student:18".to_owned(), Student {
-        name: "Alex".to_owned(),
-        age: 15,
-        state: "NY".to_owned(),
-        gpa: 3.7,
-    });
-
-    students.insert("student:18".to_owned(), Student {
-        name: "Jackson".to_owned(),
-        age: 17,
-        state: "NY".to_owned(),
-        gpa: 3.8,
-    });
-
     let gpa_order = JsonPathOrder {
         path: "gpa".to_string(),
         ordering: IndexOrd::DESC,
@@ -69,24 +35,45 @@ fn it_works() {
     });
 
     let mut students_index = Index::new(indexer);
+    students_index.insert("student:0".to_owned(), Student {
+        name: "Mambisi".to_owned(),
+        age: 21,
+        state: "CA".to_owned(),
+        gpa: 3.1,
+    });
+    students_index.insert("student:1".to_owned(), Student {
+        name: "Joseph".to_owned(),
+        age: 12,
+        state: "CA".to_owned(),
+        gpa: 3.1,
+    });
+    students_index.insert("student:2".to_owned(), Student {
+        name: "Elka".to_owned(),
+        age: 12,
+        state: "FL".to_owned(),
+        gpa: 4.0,
+    });
 
+    students_index.insert("student:18".to_owned(), Student {
+        name: "Alex".to_owned(),
+        age: 15,
+        state: "NY".to_owned(),
+        gpa: 3.7,
+    });
 
-
-
-    students_index.batch(|b| {
-        &students.iter().for_each(|(k, v)| {
-            b.insert(k, v.clone());
-        });
-        b.commit()
+    students_index.insert("student:18".to_owned(), Student {
+        name: "Jackson".to_owned(),
+        age: 17,
+        state: "NY".to_owned(),
+        gpa: 3.8,
     });
 
 
 
-
-    let query = students_index.find_where("state", EQ, "CA");
+    let query = students_index.find_where("state", Op::EQ, "CA");
     println!("Find all students in CA: {:?}", query.get());
 
-    let query = students_index.find_where("gpa", GT, 3.5);
+    let query = students_index.find_where("gpa", Op::GT, 3.5);
     println!("Find all students whose gpa greater than 3.5: {:?}", query.get());
 
 
@@ -118,7 +105,7 @@ fn it_works() {
 
 use std::fs::File;
 use std::io::BufReader;
-use crate::Op::{EQ, GT};
+use crate::Op;
 
 #[test]
 fn load_json_from_file() {

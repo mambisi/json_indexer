@@ -102,6 +102,15 @@ pub struct JsonPathOrder {
     pub ordering: IndexOrd,
 }
 
+impl JsonPathOrder {
+    pub fn new(path : &str, ord : IndexOrd) -> Self {
+        JsonPathOrder {
+            path : path.to_string(),
+            ordering : ord
+        }
+    }
+}
+
 
 #[derive(Serialize, Deserialize, Clone, Copy)]
 struct FloatKey(f64);
