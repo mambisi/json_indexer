@@ -1,6 +1,5 @@
 use serde::{Serialize, Deserialize};
 use crate::*;
-use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use std::{thread, env, time};
 use std::time::Instant;
@@ -150,7 +149,7 @@ fn load_json_from_file() {
         path_orders: vec![title_order.clone()]
     });
 
-    let mut query = index.find_where("title", Op::LIKE, "*");
+    let mut query = index.find_where("title", Op::LIKE, "Jumanji*");
     let found = query.count();
 
     let completion_time = timer.elapsed().as_millis();
