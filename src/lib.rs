@@ -29,6 +29,7 @@ use std::hash::{Hash, Hasher};
 use std::str::FromStr;
 use std::fmt;
 use std::error;
+use std::ops::Bound::{Included, Unbounded};
 
 #[derive(Serialize, Deserialize, Clone)]
 pub enum Indexer {
@@ -103,10 +104,10 @@ pub struct JsonPathOrder {
 }
 
 impl JsonPathOrder {
-    pub fn new(path : &str, ord : IndexOrd) -> Self {
+    pub fn new(path: &str, ord: IndexOrd) -> Self {
         JsonPathOrder {
-            path : path.to_string(),
-            ordering : ord
+            path: path.to_string(),
+            ordering: ord,
         }
     }
 }
@@ -145,6 +146,14 @@ impl Eq for FloatKey {}
 type MultiMap<K1, K2, V> = BTreeMap<K1, HashMap<K2, V>>;
 
 #[derive(Serialize, Deserialize, Clone)]
+enum KeyCase {
+    UpperCased,
+    LowerCased,
+    None,
+}
+
+
+#[derive(Serialize, Deserialize, Clone)]
 pub struct Index {
     pub indexer: Indexer,
     int_tree: Arc<RwLock<HashMap<String, MultiMap<i64, String, Value>>>>,
@@ -155,8 +164,8 @@ pub struct Index {
 }
 
 pub trait BatchTransaction<'a> {
-    fn insert<V>(&mut self, k: &str, v: V) where V : Serialize + Deserialize<'a>;
-    fn update<V>(&mut self, k: &str, v: V) where V : Serialize + Deserialize<'a>;
+    fn insert<V>(&mut self, k: &str, v: V) where V: Serialize + Deserialize<'a>;
+    fn update<V>(&mut self, k: &str, v: V) where V: Serialize + Deserialize<'a>;
     fn delete(&mut self, k: &str);
     fn commit(&mut self);
 }
@@ -555,22 +564,6 @@ impl<'a> Index {
         f(&mut batch);
     }
 
-    #[deprecated(since = "0.2.5", note = "Please use the size() instead")]
-    pub fn iter(&self, f: impl Fn((&String, &Value)) + std::marker::Sync + std::marker::Send) {
-        let mut new_index = self.clone();
-        new_index.sort();
-        let reader = new_index.items.read().unwrap();
-        reader.iter().for_each(f);
-    }
-
-    #[deprecated(since = "0.2.5", note = "Please use the size() instead")]
-    pub fn par_iter(&self, f: impl Fn((&String, &Value)) + std::marker::Sync + std::marker::Send) {
-        let mut new_index = self.clone();
-        new_index.sort();
-        let reader = new_index.items.read().unwrap();
-        reader.par_iter().for_each(f);
-    }
-
     pub fn get_all_items(&self, f: impl Fn((&String, &Value)) + std::marker::Sync + std::marker::Send) {
         let mut new_index = self.clone();
         new_index.sort();
@@ -644,7 +637,7 @@ impl<'a> Index {
             }
             Op::LT => {
                 let mut matches: HashMap<String, Value> = HashMap::new();
-                int_tree_reader.iter().for_each(|(k, v)| {
+                int_tree_reader.range(..q).for_each(|(k, v)| {
                     if k.lt(&q) {
                         matches.extend(v.iter().map(|(k, v)| { (k.to_string(), v.clone()) }));
                     }
@@ -653,7 +646,7 @@ impl<'a> Index {
             }
             Op::GT => {
                 let mut matches: HashMap<String, Value> = HashMap::new();
-                int_tree_reader.iter().for_each(|(k, v)| {
+                int_tree_reader.range(q..).for_each(|(k, v)| {
                     if k.gt(&q) {
                         matches.extend(v.iter().map(|(k, v)| { (k.to_string(), v.clone()) }));
                     }
@@ -674,7 +667,7 @@ impl<'a> Index {
             }
             Op::LT => {
                 let mut matches: HashMap<String, Value> = HashMap::new();
-                float_tree_reader.iter().for_each(|(k, v)| {
+                float_tree_reader.range((Unbounded, Included(FloatKey(q)))).for_each(|(k, v)| {
                     if OrderedFloat(k.0).lt(&OrderedFloat(q)) {
                         matches.extend(v.iter().map(|(k, v)| { (k.to_string(), v.clone()) }));
                     }
@@ -683,7 +676,7 @@ impl<'a> Index {
             }
             Op::GT => {
                 let mut matches: HashMap<String, Value> = HashMap::new();
-                float_tree_reader.iter().for_each(|(k, v)| {
+                float_tree_reader.range((Included(FloatKey(q)), Unbounded)).for_each(|(k, v)| {
                     if OrderedFloat(k.0).gt(&OrderedFloat(q)) {
                         matches.extend(v.iter().map(|(k, v)| { (k.to_string(), v.clone()) }));
                     }
@@ -704,7 +697,7 @@ impl<'a> Index {
             }
             Op::LT => {
                 let mut matches = HashMap::new();
-                str_tree_reader.iter().for_each(|(k, v)| {
+                str_tree_reader.range(..q.to_owned()).for_each(|(k, v)| {
                     if k.lt(&q) {
                         matches.extend(v.iter().map(|(k, v)| { (k.to_string(), v.clone()) }));
                     }
@@ -713,7 +706,7 @@ impl<'a> Index {
             }
             Op::GT => {
                 let mut matches = HashMap::new();
-                str_tree_reader.iter().for_each(|(k, v)| {
+                str_tree_reader.range(q.to_owned()..).for_each(|(k, v)| {
                     if k.gt(&q) {
                         matches.extend(v.iter().map(|(k, v)| { (k.to_string(), v.clone()) }));
                     }
@@ -721,9 +714,9 @@ impl<'a> Index {
                 matches
             }
             Op::LIKE => {
-                let mut matches = HashMap::new();
+
                 let options = glob::MatchOptions {
-                    case_sensitive: false,
+                    case_sensitive: true,
                     require_literal_separator: false,
                     require_literal_leading_dot: false,
                 };
@@ -734,12 +727,55 @@ impl<'a> Index {
                     }
                 };
 
-                str_tree_reader.iter().for_each(|(k, v)| {
-                    if glob_matcher.matches_with(k, options) {
-                        matches.extend(v.iter().map(|(k, v)| { (k.to_string(), v.clone()) }));
+                let mut prefix = String::new();
+                for c in q.chars() {
+                    match c {
+                        '*' | '?' | '[' => {
+                            break;
+                        }
+                        c => {
+                            prefix.push(c);
+                        }
                     }
-                });
-                matches
+                }
+
+                let (lb, fchar) = if prefix.is_empty() {
+                    (Unbounded, None)
+                }else {
+                    (Included(prefix.to_string()), prefix.chars().nth(0))
+                };
+
+                if lb == Unbounded {
+                    let mut matches = HashMap::new();
+                    str_tree_reader.iter().for_each(|(k,v)|{
+                        if glob_matcher.matches_with(k, options) {
+                            matches.extend(v.iter().map(|(k, v)| { (k.to_string(), v.clone()) }));
+                        }
+                    });
+                    matches
+                }
+                else {
+                    let mut matches = HashMap::new();
+                    for (k,v) in str_tree_reader.range((lb,Unbounded)) {
+                        let c2 = k.chars().nth(0);
+                        match (fchar,c2)  {
+                            (Some(c),Some(c2)) => {
+                                let c1 = c as u32;
+                                let c2 = c2 as u32;
+                                if c2 > c1 {
+                                    break;
+                                }
+                            }
+                            _ => {}
+                        }
+
+                        if glob_matcher.matches_with(k, options) {
+                            matches.extend(v.iter().map(|(k, v)| { (k.to_string(), v.clone()) }));
+                        }
+                    }
+                    matches
+                }
+
             }
         }
     }
@@ -1085,11 +1121,11 @@ impl<'a> Index {
         });
     }
 
-    pub fn get_items(&self) -> Vec<(String, Value)>{
+    pub fn get_items(&self) -> Vec<(String, Value)> {
         let mut new_index = self.clone();
         new_index.sort();
         let reader = new_index.items.read().unwrap();
-        let items = reader.par_iter().map(|(k, v)| { (k.to_string(), v.clone())}).collect();
+        let items = reader.par_iter().map(|(k, v)| { (k.to_string(), v.clone()) }).collect();
         items
     }
 }

@@ -149,7 +149,7 @@ fn load_json_from_file() {
         path_orders: vec![title_order.clone()]
     });
 
-    let mut query = index.find_where("title", Op::LIKE, "Jumanji*");
+    let mut query = index.find_where("title", Op::LIKE, "Jum*");
     let found = query.count();
 
     let completion_time = timer.elapsed().as_millis();
