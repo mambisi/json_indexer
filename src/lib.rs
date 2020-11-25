@@ -18,7 +18,7 @@ extern crate glob;
 
 use ordered_float::OrderedFloat;
 use indexmap::map::IndexMap;
-use serde_json::Value;
+use serde_json::{Value};
 use json_dotpath::DotPaths;
 use std::cmp::Ordering;
 use rayon::prelude::*;
@@ -159,7 +159,25 @@ pub struct Index {
     int_tree: Arc<RwLock<HashMap<String, MultiMap<i64, String, Value>>>>,
     str_tree: Arc<RwLock<HashMap<String, MultiMap<String, String, Value>>>>,
     float_tree: Arc<RwLock<HashMap<String, MultiMap<FloatKey, String, Value>>>>,
-    items: Arc<RwLock<IndexMap<String, Value>>>,
+    items: Arc<RwLock<IndexMap<String, Value>>>
+}
+
+impl Index {
+    pub fn from(v: &[u8]) -> Result<Self, ()> {
+        match serde_json::from_slice::<Index>(v) {
+            Ok(s) => {
+                Ok(s)
+            }
+            Err(_) => {
+                Err(())
+            }
+        }
+    }
+
+    pub fn to_vec(&self) -> Vec<u8> {
+        let b = serde_json::to_vec(&self).unwrap();
+        b
+    }
 
 }
 
